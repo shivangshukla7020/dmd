@@ -61,7 +61,7 @@ Throws:
     OutOfMemoryError if allocation fails.
 */
 
-T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength, bool isZeroInitialized) @trusted pure nothrow
+T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength, bool isZeroInitialized) @trusted
 {
     alias UnqT = Unqual!T;
     size_t sizeelem = T.sizeof;
@@ -158,7 +158,9 @@ T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength, bool isZeroInitialized)
             assert(0);
         }
 
-        memcpy(newdata, arr.ptr, oldsize);
+        // Replace with cast to remove `shared` qualifier
+        memcpy(newdata, cast(void*) arr.ptr, oldsize);
+
 
         // Only call __doPostblit if T has a postblit
         static if (__traits(compiles, __doPostblit(newdata, oldsize, UnqT)))
