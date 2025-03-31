@@ -11241,29 +11241,36 @@ private extern (C++) final class ExpressionSemanticVisitor : Visitor
         }
         /* Check the mutability of e1.
          */
-        if (auto ale = exp.e1.isArrayLengthExp())
+         if (auto ale = exp.e1.isArrayLengthExp())
         {
-            // e1 is not an lvalue, but we let the code generator handle it
+            // Check if we've already lowered this expression before
+            if (ale.lowering)
+            {
+                return setResult(ale.lowering);
+            }
 
+            // Ensure e1 is a modifiable lvalue
             auto ale1x = ale.e1.modifiableLvalueImpl(sc, exp.e1);
             if (ale1x.op == EXP.error)
                 return setResult(ale1x);
             ale.e1 = ale1x;
 
+            // Ensure the element type has a valid constructor
             Type tn = ale.e1.type.toBasetype().nextOf();
             checkDefCtor(ale.loc, tn);
 
-            // Determine the hook for array resizing (with or without tracing)
-            Identifier hook = global.params.tracegc ? Id._d_arraysetlengthTTrace : Id._d_arraysetlengthT;
+            // Choose correct GC hook
+            Identifier hook = Id._d_arraysetlengthT;
+
+            // Fix: Verify the correct hook exists
             if (!verifyHookExist(exp.loc, *sc, hook, "resizing arrays"))
                 return setError();
 
-            // Process the second expression (new length)
             exp.e2 = exp.e2.expressionSemantic(sc);
             auto lc = lastComma(exp.e2);
             lc = lc.optimize(WANTvalue);
 
-            // If arr.length is 0, avoid runtime call and use slice
+            // Optimize case where arr.length = 0
             if (lc.op == EXP.int64 && lc.toInteger() == 0)
             {
                 Expression se = new SliceExp(ale.loc, ale.e1, lc, lc);
@@ -11271,41 +11278,30 @@ private extern (C++) final class ExpressionSemanticVisitor : Visitor
                 as = as.expressionSemantic(sc);
                 auto res = Expression.combine(as, exp.e2);
                 res.type = ale.type;
+                ale.lowering = res;  // Cache the lowered result
                 return setResult(res);
             }
 
-            // If only compile-time information is needed, return the result
-            if (!sc.needsCodegen())
+            if (!sc.needsCodegen()) // Compile-time only case
             {
                 exp.type = Type.tsize_t;
                 return setResult(exp);
             }
 
-            // Lower to a call to the appropriate version of _d_arraysetlengthT (with or without tracing)
-            Expression id = new IdentifierExp(ale.loc, Id.empty);
-            id = new DotIdExp(ale.loc, id, Id.object);
-            id = new DotIdExp(ale.loc, id, hook);  // Select the correct hook based on tracegc
-
-            // Create the template instance for _d_arraysetlengthT
-            auto tiargs = new Objects();
-            tiargs.push(ale.e1.type);  // Push T[] as the template argument for _d_arraysetlengthT
-
-            // Create the DotTemplateInstanceExp
-            id = new DotTemplateInstanceExp(ale.loc, id, hook, tiargs);
+            // Fix: Ensure correct reference for _d_arraysetlengthT
+            Expression id = new IdentifierExp(ale.loc, hook);
             id = id.expressionSemantic(sc);
 
-            // Arguments for the call: array and new length, plus isZeroInitialized
+            // Generate call: _d_arraysetlengthT(e1, e2)
             auto arguments = new Expressions();
-            arguments.push(ale.e1);  // Array
-            arguments.push(exp.e2);  // New length
-            arguments.push(new IntegerExp(exp.loc, true, Type.tbool));  // Pass true for isZeroInitialized
+            arguments.push(ale.e1);  // array
+            arguments.push(exp.e2);  // new length
+            arguments.push(new IntegerExp(ale.loc, 1, Type.tbool));  // isMutable = true
 
-            // Lower the call expression
             Expression ce = new CallExp(ale.loc, id, arguments).expressionSemantic(sc);
-
-            // Wrap it in a LoweredAssignExp for the result
             auto res = new LoweredAssignExp(exp, ce);
             res.type = Type.tsize_t;
+            ale.lowering = res;  // Cache the lowered result
             return setResult(res);
         }
         else if (auto se = exp.e1.isSliceExp())
