@@ -17,7 +17,7 @@ import core.memory;
 import core.stdc.stdlib : malloc;
 import core.stdc.string : memcpy, memset;
 static import rt.tlsgc;
-import std.traits : Unqual;
+import core.internal.traits : Unqual;
 
 
 debug (PRINTF) import core.stdc.stdio : printf;

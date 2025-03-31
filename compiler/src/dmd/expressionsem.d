@@ -11253,15 +11253,17 @@ private extern (C++) final class ExpressionSemanticVisitor : Visitor
             Type tn = ale.e1.type.toBasetype().nextOf();
             checkDefCtor(ale.loc, tn);
 
+            // Determine the hook for array resizing (with or without tracing)
             Identifier hook = global.params.tracegc ? Id._d_arraysetlengthTTrace : Id._d_arraysetlengthT;
-            if (!verifyHookExist(exp.loc, *sc, Id._d_arraysetlengthTImpl, "resizing arrays"))
+            if (!verifyHookExist(exp.loc, *sc, hook, "resizing arrays"))
                 return setError();
 
+            // Process the second expression (new length)
             exp.e2 = exp.e2.expressionSemantic(sc);
             auto lc = lastComma(exp.e2);
             lc = lc.optimize(WANTvalue);
 
-            // Use slice expression when arr.length == 0 to avoid runtime call
+            // If arr.length is 0, avoid runtime call and use slice
             if (lc.op == EXP.int64 && lc.toInteger() == 0)
             {
                 Expression se = new SliceExp(ale.loc, ale.e1, lc, lc);
@@ -11272,30 +11274,33 @@ private extern (C++) final class ExpressionSemanticVisitor : Visitor
                 return setResult(res);
             }
 
-            if (!sc.needsCodegen())      // If compile-time only
+            // If only compile-time information is needed, return the result
+            if (!sc.needsCodegen())
             {
                 exp.type = Type.tsize_t;
                 return setResult(exp);
             }
 
-            // Lower to the call to _d_arraysetlengthT{,Trace}(e1, e2)
+            // Lower to a call to the appropriate version of _d_arraysetlengthT (with or without tracing)
             Expression id = new IdentifierExp(ale.loc, Id.empty);
             id = new DotIdExp(ale.loc, id, Id.object);
-            id = new DotIdExp(ale.loc, id, hook); // Directly access the hook based on condition
+            id = new DotIdExp(ale.loc, id, hook);  // Select the correct hook based on tracegc
 
-            // Adjust the type to the correct template argument for _d_arraysetlengthT
+            // Create the template instance for _d_arraysetlengthT
             auto tiargs = new Objects();
-            tiargs.push(ale.e1.type);  // T[] type for _d_arraysetlengthT
+            tiargs.push(ale.e1.type);  // Push T[] as the template argument for _d_arraysetlengthT
 
-            id = new DotTemplateInstanceExp(ale.loc, id, Id._d_arraysetlengthTImpl, tiargs);
+            // Create the DotTemplateInstanceExp
+            id = new DotTemplateInstanceExp(ale.loc, id, hook, tiargs);
             id = id.expressionSemantic(sc);
 
-            // Create arguments for the call to _d_arraysetlengthT
+            // Arguments for the call: array and new length, plus isZeroInitialized
             auto arguments = new Expressions();
             arguments.push(ale.e1);  // Array
             arguments.push(exp.e2);  // New length
+            arguments.push(new IntegerExp(exp.loc, true, Type.tbool));  // Pass true for isZeroInitialized
 
-            // Call the lowered expression
+            // Lower the call expression
             Expression ce = new CallExp(ale.loc, id, arguments).expressionSemantic(sc);
 
             // Wrap it in a LoweredAssignExp for the result
