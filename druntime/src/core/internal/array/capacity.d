@@ -16,8 +16,8 @@ import core.internal.gc.blockmeta : PAGESIZE;
 import core.memory;
 import core.stdc.stdlib : malloc;
 import core.stdc.string : memcpy, memset;
-static import rt.tlsgc;
 import core.internal.traits : Unqual;
+import core.lifetime : emplace;
 
 
 debug (PRINTF) import core.stdc.stdio : printf;
@@ -129,20 +129,26 @@ T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength, bool isZeroInitialized)
             memset(ptr, 0, newsize);
         else
         {
-            foreach (i; 0 .. newlength - arr.length)
+            // Guard against T being void
+            static if (!is(T == void))
             {
-                emplace(&cast(T[]) arr[i], T.init);
+                foreach (i; 0 .. newlength - arr.length)
+                {
+                    emplace(cast(T*) ptr + (arr.length + i) * sizeelem, T.init); // Directly initialize each new element.
+                }
             }
         }
 
-        arr = (cast(T*) ptr)[0 .. newlength];
+        arr = cast(T[]) ptr[0 .. newlength];  // Cast to slice from raw pointer
         return arr;
     }
 
     size_t oldsize = arr.length * sizeelem;
     bool isshared = is(UnqT == shared UnqT);
 
-    void* newdata = arr.ptr;
+    // Explicit cast to void* for immutable types
+    void* newdata = cast(void*) arr.ptr;
+
     if (!gc_expandArrayUsed(newdata[0 .. oldsize], newsize, isshared))
     {
         newdata = GC.malloc(newsize, __typeAttrs(typeid(T)) | BlkAttr.APPENDABLE, typeid(T));
@@ -166,39 +172,18 @@ T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength, bool isZeroInitialized)
         memset(newdata + oldsize, 0, newsize - oldsize);
     else
     {
-        foreach (i; 0 .. newlength - arr.length)
+        static if (!is(T == void))  // Guard against void type
         {
-            emplace(&cast(T[]) (newdata + oldsize)[i], T.init);
+            foreach (i; 0 .. newlength - arr.length)
+            {
+                emplace(cast(T*) (newdata + oldsize) + i, T.init);  // Initialize new elements in new memory region.
+            }
         }
     }
 
-    arr = (cast(T*) newdata)[0 .. newlength];
+    // Correctly cast to slice from raw pointer
+    arr = cast(T[]) newdata[0 .. newlength];  
     return arr;
-}
-
-// Helper function to initialize newly allocated elements
-@trusted static void doInitialize(void* start, void* end, const void[] initializer) pure nothrow
-{
-    import core.stdc.string : memcpy;
-
-    if (initializer.length == 1)
-    {
-        memset(start, *(cast(ubyte*) initializer.ptr), end - start);
-    }
-    else
-    {
-        auto q = initializer.ptr;
-        immutable initsize = initializer.length;
-        for (; start + initsize <= end; start += initsize)
-        {
-            memcpy(start, q, initsize);
-        }
-        if (start < end)
-        {
-            memcpy(start, q, end - start);
-        }
-
-    }
 }
 
 version (D_ProfileGC)
