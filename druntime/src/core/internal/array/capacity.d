@@ -60,11 +60,16 @@ Returns:
 Throws:  
     OutOfMemoryError if allocation fails.
 */
+// Overload for shared arrays
+T[] _d_arraysetlengthT(T)(ref shared T[] arr, size_t newlength, bool isZeroInitialized) @trusted
+{
+    // Cast the shared array to a non-shared array
+    return _d_arraysetlengthT!(T)(cast(T[])arr, newlength, isZeroInitialized);
+}
 
-T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength, bool isZeroInitialized) @trusted
+T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength, bool isZeroInitialized = true) @trusted
 {
     alias UnqT = Unqual!T;
-    size_t sizeelem = T.sizeof;
 
     debug(PRINTF)
     {
@@ -77,144 +82,167 @@ T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength, bool isZeroInitialized)
         return arr;
     }
 
-    // Calculate new size: newlength * sizeelem
-    bool overflow = false;
-    size_t newsize;
+    // Special case for void[]: treat as raw bytes, never cast
+    static if (is(T == void))
+    {
+        size_t newsize = newlength;  // void[] has no element size
 
-    version (D_InlineAsm_X86)
-    {
-        asm pure nothrow @nogc
+        if (!arr.ptr)
         {
-            mov EAX, newlength;
-            mul EAX, sizeelem;
-            mov newsize, EAX;
-            setc overflow;
+            assert(arr.length == 0);
+            void* ptr = GC.malloc(newsize, BlkAttr.APPENDABLE);
+            if (!ptr)
+            {
+                onOutOfMemoryError();
+                assert(0);
+            }
+
+            memset(ptr, 0, newsize);  // Always zero-initialize void[]
+            arr = (cast(void*) ptr)[0 .. newlength]; // ✅ Avoid implicit cast
+            return arr;
         }
-    }
-    else version (D_InlineAsm_X86_64)
-    {
-        asm pure nothrow @nogc
+
+        size_t oldsize = arr.length;
+        void* newdata = arr.ptr;
+
+        if (!gc_expandArrayUsed(newdata[0 .. oldsize], newsize, false))
         {
-            mov RAX, newlength;
-            mul RAX, sizeelem;
-            mov newsize, RAX;
-            setc overflow;
+            newdata = GC.malloc(newsize, BlkAttr.APPENDABLE);
+            if (!newdata)
+            {
+                onOutOfMemoryError();
+                assert(0);
+            }
+
+            memcpy(newdata, arr.ptr, oldsize);
         }
+
+        memset(newdata + oldsize, 0, newsize - oldsize);  // Always zero-init
+        arr = (cast(void*) newdata)[0 .. newlength]; // ✅ Avoid implicit cast
+        return arr;
     }
     else
     {
-        newsize = mulu(sizeelem, newlength, overflow);
-    }
+        size_t sizeelem = T.sizeof;
+        bool overflow = false;
+        size_t newsize;
 
-    if (overflow)
-    {
-        onOutOfMemoryError();
-        assert(0);
-    }
+        version (D_InlineAsm_X86)
+        {
+            asm pure nothrow @nogc
+            {
+                mov EAX, newlength;
+                mul EAX, sizeelem;
+                mov newsize, EAX;
+                setc overflow;
+            }
+        }
+        else version (D_InlineAsm_X86_64)
+        {
+            asm pure nothrow @nogc
+            {
+                mov RAX, newlength;
+                mul RAX, sizeelem;
+                mov newsize, RAX;
+                setc overflow;
+            }
+        }
+        else
+        {
+            newsize = mulu(sizeelem, newlength, overflow);
+        }
 
-    debug(PRINTF) printf("newsize = %zx\n", newsize);
-
-    if (!arr.ptr)
-    {
-        assert(arr.length == 0);
-
-        void* ptr = GC.malloc(newsize, __typeAttrs(typeid(T)) | BlkAttr.APPENDABLE, typeid(T));
-        if (!ptr)
+        if (overflow)
         {
             onOutOfMemoryError();
             assert(0);
+        }
+
+        debug(PRINTF) printf("newsize = %zx\n", newsize);
+
+        if (!arr.ptr)
+        {
+            assert(arr.length == 0);
+            void* ptr = GC.malloc(newsize, __typeAttrs(typeid(T)) | BlkAttr.APPENDABLE, typeid(T));
+            if (!ptr)
+            {
+                onOutOfMemoryError();
+                assert(0);
+            }
+
+            if (isZeroInitialized)
+                memset(ptr, 0, newsize);
+            else
+            {
+                foreach (i; 0 .. newlength)
+                {
+                    emplace(cast(T*) ptr + i, T.init);
+                }
+            }
+
+            arr = (cast(T*) ptr)[0 .. newlength]; // ✅ Avoid implicit cast
+            return arr;
+        }
+
+        size_t oldsize = arr.length * sizeelem;
+        bool isshared = is(UnqT == shared UnqT);
+        void* newdata = cast(void*) arr.ptr;
+
+        if (!gc_expandArrayUsed(newdata[0 .. oldsize], newsize, isshared))
+        {
+            newdata = GC.malloc(newsize, __typeAttrs(typeid(T)) | BlkAttr.APPENDABLE, typeid(T));
+            if (!newdata)
+            {
+                onOutOfMemoryError();
+                assert(0);
+            }
+
+            memcpy(newdata, cast(void*) arr.ptr, oldsize);
+
+            static if (__traits(compiles, __doPostblit(newdata, oldsize, UnqT)))
+            {
+                __doPostblit(newdata, oldsize, UnqT);
+            }
         }
 
         if (isZeroInitialized)
-            memset(ptr, 0, newsize);
+            memset(newdata + oldsize, 0, newsize - oldsize);
         else
-        {
-            // Guard against T being void
-            static if (!is(T == void))
-            {
-                foreach (i; 0 .. newlength - arr.length)
-                {
-                    emplace(cast(T*) ptr + (arr.length + i) * sizeelem, T.init); // Directly initialize each new element.
-                }
-            }
-        }
-
-        arr = cast(T[]) ptr[0 .. newlength];  // Cast to slice from raw pointer
-        return arr;
-    }
-
-    size_t oldsize = arr.length * sizeelem;
-    bool isshared = is(UnqT == shared UnqT);
-
-    // Explicit cast to void* for immutable types
-    void* newdata = cast(void*) arr.ptr;
-
-    if (!gc_expandArrayUsed(newdata[0 .. oldsize], newsize, isshared))
-    {
-        newdata = GC.malloc(newsize, __typeAttrs(typeid(T)) | BlkAttr.APPENDABLE, typeid(T));
-        if (!newdata)
-        {
-            onOutOfMemoryError();
-            assert(0);
-        }
-
-        // Replace with cast to remove `shared` qualifier
-        memcpy(newdata, cast(void*) arr.ptr, oldsize);
-
-
-        // Only call __doPostblit if T has a postblit
-        static if (__traits(compiles, __doPostblit(newdata, oldsize, UnqT)))
-        {
-            __doPostblit(newdata, oldsize, UnqT);
-        }
-    }
-
-    // Initialize the unused portion of the newly allocated space
-    if (isZeroInitialized)
-        memset(newdata + oldsize, 0, newsize - oldsize);
-    else
-    {
-        static if (!is(T == void))  // Guard against void type
         {
             foreach (i; 0 .. newlength - arr.length)
             {
-                emplace(cast(T*) (newdata + oldsize) + i, T.init);  // Initialize new elements in new memory region.
+                emplace(cast(T*) (newdata + oldsize) + i, T.init);
             }
         }
+
+        arr = (cast(T*) newdata)[0 .. newlength]; // ✅ Avoid implicit cast
+        return arr;
     }
-
-    // Correctly cast to slice from raw pointer
-    arr = cast(T[]) newdata[0 .. newlength];  
-    return arr;
 }
-
-version (D_ProfileGC)
-{
-    import core.internal.array.utils : _d_HookTraceImpl;
-    
-    alias _d_arraysetlengthTTrace = _d_HookTraceImpl!(T, _d_arraysetlengthT, "GC Profile Trace: _d_arraysetlengthT");
-}
-
 
 private uint __typeAttrs(const scope TypeInfo ti, void *copyAttrsFrom = null) pure nothrow
 {
     if (copyAttrsFrom)
     {
-        // try to copy attrs from the given block
         auto info = GC.query(copyAttrsFrom);
         if (info.base)
             return info.attr;
     }
+
+    // Special handling for `void[]` to match old behavior
+    if (ti is null)  // `void[]` case
+        return BlkAttr.NO_SCAN | BlkAttr.APPENDABLE;  // ✅ Matches old hooks
+
     uint attrs = !(ti.flags & 1) ? BlkAttr.NO_SCAN : 0;
+
     if (typeid(ti) is typeid(TypeInfo_Struct)) {
-        auto sti = cast(TypeInfo_Struct)cast(void*)ti;
+        auto sti = cast(TypeInfo_Struct) cast(void*) ti;
         if (sti.xdtor)
             attrs |= BlkAttr.FINALIZE;
     }
+    
     return attrs;
 }
-
-
 
 // @safe unittest remains intact
 @safe unittest
