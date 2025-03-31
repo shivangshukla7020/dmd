@@ -17,6 +17,8 @@ import core.memory;
 import core.stdc.stdlib : malloc;
 import core.stdc.string : memcpy, memset;
 static import rt.tlsgc;
+import std.traits : Unqual;
+
 
 debug (PRINTF) import core.stdc.stdio : printf;
 debug (VALGRIND) import etc.valgrind.valgrind;
@@ -117,7 +119,7 @@ T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength, bool isZeroInitialized)
     {
         assert(arr.length == 0);
 
-        void* ptr = GC.malloc(newsize, __typeAttrs(T) | BlkAttr.APPENDABLE, T);
+        void* ptr = GC.malloc(newsize, __typeAttrs(typeid(T)) | BlkAttr.APPENDABLE, typeid(T));
         if (!ptr)
         {
             onOutOfMemoryError();
@@ -139,7 +141,7 @@ T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength, bool isZeroInitialized)
     void* newdata = arr.ptr;
     if (!gc_expandArrayUsed(newdata[0 .. oldsize], newsize, isshared))
     {
-        newdata = GC.malloc(newsize, __typeAttrs(T) | BlkAttr.APPENDABLE, T);
+        newdata = GC.malloc(newsize, __typeAttrs(typeid(T)) | BlkAttr.APPENDABLE, typeid(T));
         if (!newdata)
         {
             onOutOfMemoryError();
@@ -158,14 +160,14 @@ T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength, bool isZeroInitialized)
     if (isZeroInitialized)
         memset(newdata + oldsize, 0, newsize - oldsize);
     else
-        doInitialize(newdata + oldsize, newdata + newsize, UnqT.init.ptr);
+        doInitialize(newdata + oldsize, newdata + newsize, UnqT.init[0 .. UnqT.sizeof]);
 
     arr = (cast(T*) newdata)[0 .. newlength];
     return arr;
 }
 
 // Helper function to initialize newly allocated elements
-@trusted static void doInitialize(void* start, void* end, const void[] initializer)
+@trusted static void doInitialize(void* start, void* end, const void[] initializer) pure nothrow
 {
     import core.stdc.string : memcpy;
 
@@ -195,6 +197,27 @@ version (D_ProfileGC)
     
     alias _d_arraysetlengthTTrace = _d_HookTraceImpl!(T, _d_arraysetlengthT, "GC Profile Trace: _d_arraysetlengthT");
 }
+
+
+private uint __typeAttrs(const scope TypeInfo ti, void *copyAttrsFrom = null) pure nothrow
+{
+    if (copyAttrsFrom)
+    {
+        // try to copy attrs from the given block
+        auto info = GC.query(copyAttrsFrom);
+        if (info.base)
+            return info.attr;
+    }
+    uint attrs = !(ti.flags & 1) ? BlkAttr.NO_SCAN : 0;
+    if (typeid(ti) is typeid(TypeInfo_Struct)) {
+        auto sti = cast(TypeInfo_Struct)cast(void*)ti;
+        if (sti.xdtor)
+            attrs |= BlkAttr.FINALIZE;
+    }
+    return attrs;
+}
+
+
 
 // @safe unittest remains intact
 @safe unittest
