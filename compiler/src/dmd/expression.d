@@ -3764,7 +3764,7 @@ extern (C++) final class SliceExp : UnaExp
  */
 extern (C++) final class ArrayLengthExp : UnaExp
 {
-    Expression* lowering; // Field to store the lowered expression
+    Expression lowering; // Field to store the lowered expression
 
     extern (D) this(Loc loc, Expression e1) @safe
     {

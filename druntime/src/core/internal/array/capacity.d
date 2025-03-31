@@ -61,8 +61,7 @@ Throws:
     OutOfMemoryError if allocation fails.
 */
 
-@trusted
-T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength, bool isZeroInitialized) pure nothrow
+T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength, bool isZeroInitialized) @trusted pure nothrow
 {
     alias UnqT = Unqual!T;
     size_t sizeelem = T.sizeof;
@@ -81,7 +80,7 @@ T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength, bool isZeroInitialized)
     // Calculate new size: newlength * sizeelem
     bool overflow = false;
     size_t newsize;
-    
+
     version (D_InlineAsm_X86)
     {
         asm pure nothrow @nogc
@@ -129,7 +128,12 @@ T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength, bool isZeroInitialized)
         if (isZeroInitialized)
             memset(ptr, 0, newsize);
         else
-            doInitialize(ptr, ptr + newsize, T.init);
+        {
+            foreach (i; 0 .. newlength - arr.length)
+            {
+                emplace(&cast(T[]) arr[i], T.init);
+            }
+        }
 
         arr = (cast(T*) ptr)[0 .. newlength];
         return arr;
@@ -149,7 +153,7 @@ T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength, bool isZeroInitialized)
         }
 
         memcpy(newdata, arr.ptr, oldsize);
-        
+
         // Only call __doPostblit if T has a postblit
         static if (__traits(compiles, __doPostblit(newdata, oldsize, UnqT)))
         {
@@ -157,10 +161,16 @@ T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength, bool isZeroInitialized)
         }
     }
 
+    // Initialize the unused portion of the newly allocated space
     if (isZeroInitialized)
         memset(newdata + oldsize, 0, newsize - oldsize);
     else
-        doInitialize(newdata + oldsize, newdata + newsize, UnqT.init[0 .. UnqT.sizeof]);
+    {
+        foreach (i; 0 .. newlength - arr.length)
+        {
+            emplace(&cast(T[]) (newdata + oldsize)[i], T.init);
+        }
+    }
 
     arr = (cast(T*) newdata)[0 .. newlength];
     return arr;
