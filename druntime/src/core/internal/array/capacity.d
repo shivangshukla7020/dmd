@@ -18,7 +18,7 @@ import core.stdc.stdlib : malloc;
 import core.stdc.string : memcpy, memset;
 import core.internal.traits : Unqual;
 import core.lifetime : emplace;
-
+import core.internal.array.construction : _d_newarrayU;
 
 debug (PRINTF) import core.stdc.stdio : printf;
 debug (VALGRIND) import etc.valgrind.valgrind;
@@ -60,14 +60,29 @@ Returns:
 Throws:  
     OutOfMemoryError if allocation fails.
 */
+
 // Overload for shared arrays
-T[] _d_arraysetlengthT(T)(ref shared T[] arr, size_t newlength, bool isZeroInitialized) @trusted
+T[] _d_arraysetlengthT(T)(ref shared T[] arr, size_t newlength) @trusted
 {
     // Cast the shared array to a non-shared array
-    return _d_arraysetlengthT!(T)(cast(T[])arr, newlength, isZeroInitialized);
+    return _d_arraysetlengthT!(T)(cast(T[])arr, newlength);
 }
 
-T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength, bool isZeroInitialized = true) @trusted
+T[] _d_arraysetlengthT(T)(ref string arr, size_t newlength) @trusted
+{
+    // Handle string resizing specifically
+    // Use _d_newarrayU to allocate a new array of `char` type
+    auto newArr = _d_newarrayU!char(newlength);
+    
+    // Cast to immutable(char)[] since `string` is immutable in D
+    arr = cast(immutable(char)[]) newArr[0 .. newlength];
+    
+    // Return the array in the expected form
+    return [arr];
+}
+
+// General case
+T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength) @trusted
 {
     alias UnqT = Unqual!T;
 
@@ -82,23 +97,21 @@ T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength, bool isZeroInitialized 
         return arr;
     }
 
-    // Special case for void[]: treat as raw bytes, never cast
     static if (is(T == void))
     {
-        size_t newsize = newlength;  // void[] has no element size
+        size_t newsize = newlength;
 
         if (!arr.ptr)
         {
             assert(arr.length == 0);
-            void* ptr = GC.malloc(newsize, BlkAttr.APPENDABLE);
+            void* ptr = GC.malloc(newsize, BlkAttr.NO_SCAN | BlkAttr.APPENDABLE);
             if (!ptr)
             {
                 onOutOfMemoryError();
                 assert(0);
             }
-
-            memset(ptr, 0, newsize);  // Always zero-initialize void[]
-            arr = (cast(void*) ptr)[0 .. newlength]; // ✅ Avoid implicit cast
+            memset(ptr, 0, newsize);
+            arr = (cast(void*) ptr)[0 .. newlength];
             return arr;
         }
 
@@ -107,18 +120,23 @@ T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength, bool isZeroInitialized 
 
         if (!gc_expandArrayUsed(newdata[0 .. oldsize], newsize, false))
         {
-            newdata = GC.malloc(newsize, BlkAttr.APPENDABLE);
+            newdata = GC.malloc(newsize, BlkAttr.NO_SCAN | BlkAttr.APPENDABLE);
             if (!newdata)
             {
                 onOutOfMemoryError();
                 assert(0);
             }
-
             memcpy(newdata, arr.ptr, oldsize);
         }
-
-        memset(newdata + oldsize, 0, newsize - oldsize);  // Always zero-init
-        arr = (cast(void*) newdata)[0 .. newlength]; // ✅ Avoid implicit cast
+        memset(newdata + oldsize, 0, newsize - oldsize);
+        arr = (cast(void*) newdata)[0 .. newlength];
+        return arr;
+    }
+    else static if (is(T == char)) // Special handling for strings
+    {
+        // Use _d_newarrayU for string allocation
+        auto newarr = _d_newarrayU!char(newlength);
+        arr = newarr[0 .. newlength];
         return arr;
     }
     else
@@ -160,18 +178,27 @@ T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength, bool isZeroInitialized 
 
         debug(PRINTF) printf("newsize = %zx\n", newsize);
 
+        uint gcAttrs = BlkAttr.APPENDABLE;
+        static if (is(T == struct) && __traits(hasMember, T, "xdtor"))
+        {
+            gcAttrs |= BlkAttr.FINALIZE;
+        }
+
         if (!arr.ptr)
         {
             assert(arr.length == 0);
-            void* ptr = GC.malloc(newsize, __typeAttrs(typeid(T)) | BlkAttr.APPENDABLE, typeid(T));
+            void* ptr = GC.malloc(newsize, gcAttrs);
             if (!ptr)
             {
                 onOutOfMemoryError();
                 assert(0);
             }
 
-            if (isZeroInitialized)
+            // Handle initialization based on whether the type requires zero-init
+            static if (__traits(isZeroInit, T))
+            {
                 memset(ptr, 0, newsize);
+            }
             else
             {
                 foreach (i; 0 .. newlength)
@@ -180,7 +207,7 @@ T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength, bool isZeroInitialized 
                 }
             }
 
-            arr = (cast(T*) ptr)[0 .. newlength]; // ✅ Avoid implicit cast
+            arr = (cast(T*) ptr)[0 .. newlength];
             return arr;
         }
 
@@ -190,23 +217,24 @@ T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength, bool isZeroInitialized 
 
         if (!gc_expandArrayUsed(newdata[0 .. oldsize], newsize, isshared))
         {
-            newdata = GC.malloc(newsize, __typeAttrs(typeid(T)) | BlkAttr.APPENDABLE, typeid(T));
+            newdata = GC.malloc(newsize, gcAttrs);
             if (!newdata)
             {
                 onOutOfMemoryError();
                 assert(0);
             }
-
             memcpy(newdata, cast(void*) arr.ptr, oldsize);
-
             static if (__traits(compiles, __doPostblit(newdata, oldsize, UnqT)))
             {
                 __doPostblit(newdata, oldsize, UnqT);
             }
         }
 
-        if (isZeroInitialized)
+        // Handle initialization based on whether the type requires zero-init
+        static if (__traits(isZeroInit, T))
+        {
             memset(newdata + oldsize, 0, newsize - oldsize);
+        }
         else
         {
             foreach (i; 0 .. newlength - arr.length)
@@ -215,33 +243,9 @@ T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength, bool isZeroInitialized 
             }
         }
 
-        arr = (cast(T*) newdata)[0 .. newlength]; // ✅ Avoid implicit cast
+        arr = (cast(T*) newdata)[0 .. newlength];
         return arr;
     }
-}
-
-private uint __typeAttrs(const scope TypeInfo ti, void *copyAttrsFrom = null) pure nothrow
-{
-    if (copyAttrsFrom)
-    {
-        auto info = GC.query(copyAttrsFrom);
-        if (info.base)
-            return info.attr;
-    }
-
-    // Special handling for `void[]` to match old behavior
-    if (ti is null)  // `void[]` case
-        return BlkAttr.NO_SCAN | BlkAttr.APPENDABLE;  // ✅ Matches old hooks
-
-    uint attrs = !(ti.flags & 1) ? BlkAttr.NO_SCAN : 0;
-
-    if (typeid(ti) is typeid(TypeInfo_Struct)) {
-        auto sti = cast(TypeInfo_Struct) cast(void*) ti;
-        if (sti.xdtor)
-            attrs |= BlkAttr.FINALIZE;
-    }
-    
-    return attrs;
 }
 
 // @safe unittest remains intact
@@ -253,13 +257,13 @@ private uint __typeAttrs(const scope TypeInfo ti, void *copyAttrsFrom = null) pu
     }
 
     int[] arr;
-    _d_arraysetlengthT!(int)(arr, 16, true);
+    _d_arraysetlengthT!(int)(arr, 16);
     assert(arr.length == 16);
     foreach (int i; arr)
         assert(i == int.init);
 
     shared S[] arr2;
-    _d_arraysetlengthT!(shared S)(arr2, 16, true);
+    _d_arraysetlengthT!(shared S)(arr2, 16);
     assert(arr2.length == 16);
     foreach (s; arr2)
         assert(s == S.init);

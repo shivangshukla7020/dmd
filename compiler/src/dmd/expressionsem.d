@@ -11241,7 +11241,7 @@ private extern (C++) final class ExpressionSemanticVisitor : Visitor
         }
         /* Check the mutability of e1.
          */
-         if (auto ale = exp.e1.isArrayLengthExp())
+        if (auto ale = exp.e1.isArrayLengthExp())
         {
             // Check if we've already lowered this expression before
             if (ale.lowering)
@@ -11296,8 +11296,8 @@ private extern (C++) final class ExpressionSemanticVisitor : Visitor
             auto arguments = new Expressions();
             arguments.push(ale.e1);  // array
             arguments.push(exp.e2);  // new length
-            arguments.push(new IntegerExp(ale.loc, 1, Type.tbool));  // isMutable = true
 
+            // We no longer need isZeroInitialized; it's handled inside _d_arraysetlengthT
             Expression ce = new CallExp(ale.loc, id, arguments).expressionSemantic(sc);
             auto res = new LoweredAssignExp(exp, ce);
             res.type = Type.tsize_t;
