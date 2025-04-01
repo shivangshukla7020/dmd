@@ -44,16 +44,16 @@ Tret _d_arraycatnTX(Tret, Tarr...)(auto ref Tarr froms) @trusted
     // res.length = totalLen;
     // Call the runtime function directly instead.
     // TODO: once `__arrayAlloc` is templated, call that instead.
-    version (D_ProfileGC)
-    {
-        import core.internal.array.capacity : _d_arraysetlengthTTrace;
-        // TODO: forward file, line, name from _d_arraycatnTXTrace
-        _d_arraysetlengthTTrace!(typeof(res))(res, totalLen, __FILE__, __LINE__, __FUNCTION__);
-    }
-    else
-    {
-        _d_arraysetlengthT!(typeof(res))(res, totalLen);
-    }
+    // version (D_ProfileGC)
+    // {
+    //     import core.internal.array.capacity : _d_arraysetlengthTTrace;
+    //     // TODO: forward file, line, name from _d_arraycatnTXTrace
+    //     _d_arraysetlengthTTrace!(typeof(res))(res, totalLen, __FILE__, __LINE__, __FUNCTION__);
+    // }
+    // else
+    // {
+    //     _d_arraysetlengthT!(typeof(res))(res, totalLen);
+    // }
 
 
     /* Currently, if both a postblit and a cpctor are defined, the postblit is

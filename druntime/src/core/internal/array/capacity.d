@@ -52,7 +52,6 @@ void main()
 Params:
     arr         = The array to resize.
     newlength   = The new value for the array's `.length`.
-    isZeroInitialized = Whether new elements should be zero-initialized.
 
 Returns:  
     The resized array with updated length and properly initialized elements.
@@ -61,27 +60,7 @@ Throws:
     OutOfMemoryError if allocation fails.
 */
 
-// Overload for shared arrays
-T[] _d_arraysetlengthT(T)(ref shared T[] arr, size_t newlength) @trusted
-{
-    // Cast the shared array to a non-shared array
-    return _d_arraysetlengthT!(T)(cast(T[])arr, newlength);
-}
 
-T[] _d_arraysetlengthT(T)(ref string arr, size_t newlength) @trusted
-{
-    // Handle string resizing specifically
-    // Use _d_newarrayU to allocate a new array of `char` type
-    auto newArr = _d_newarrayU!char(newlength);
-    
-    // Cast to immutable(char)[] since `string` is immutable in D
-    arr = cast(immutable(char)[]) newArr[0 .. newlength];
-    
-    // Return the array in the expected form
-    return [arr];
-}
-
-// General case
 T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength) @trusted
 {
     alias UnqT = Unqual!T;
@@ -91,22 +70,21 @@ T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength) @trusted
         printf("_d_arraysetlengthT(arr.ptr = %p, arr.length = %zd, newlength = %zd)\n", arr.ptr, arr.length, newlength);
     }
 
+    // If the new length is less than or equal to the current length, just truncate the array
     if (newlength <= arr.length)
     {
         arr = arr[0 .. newlength];
         return arr;
     }
 
-    static if (is(T == void))
-    {
+    // For all other types, continue with normal processing
+    static if (is(T == void)) {
         size_t newsize = newlength;
 
-        if (!arr.ptr)
-        {
+        if (!arr.ptr) {
             assert(arr.length == 0);
             void* ptr = GC.malloc(newsize, BlkAttr.NO_SCAN | BlkAttr.APPENDABLE);
-            if (!ptr)
-            {
+            if (!ptr) {
                 onOutOfMemoryError();
                 assert(0);
             }
@@ -118,11 +96,9 @@ T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength) @trusted
         size_t oldsize = arr.length;
         void* newdata = arr.ptr;
 
-        if (!gc_expandArrayUsed(newdata[0 .. oldsize], newsize, false))
-        {
+        if (!gc_expandArrayUsed(newdata[0 .. oldsize], newsize, false)) {
             newdata = GC.malloc(newsize, BlkAttr.NO_SCAN | BlkAttr.APPENDABLE);
-            if (!newdata)
-            {
+            if (!newdata) {
                 onOutOfMemoryError();
                 assert(0);
             }
@@ -131,16 +107,7 @@ T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength) @trusted
         memset(newdata + oldsize, 0, newsize - oldsize);
         arr = (cast(void*) newdata)[0 .. newlength];
         return arr;
-    }
-    else static if (is(T == char)) // Special handling for strings
-    {
-        // Use _d_newarrayU for string allocation
-        auto newarr = _d_newarrayU!char(newlength);
-        arr = newarr[0 .. newlength];
-        return arr;
-    }
-    else
-    {
+    } else {
         size_t sizeelem = T.sizeof;
         bool overflow = false;
         size_t newsize;
@@ -165,13 +132,11 @@ T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength) @trusted
                 setc overflow;
             }
         }
-        else
-        {
+        else {
             newsize = mulu(sizeelem, newlength, overflow);
         }
 
-        if (overflow)
-        {
+        if (overflow) {
             onOutOfMemoryError();
             assert(0);
         }
@@ -184,25 +149,19 @@ T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength) @trusted
             gcAttrs |= BlkAttr.FINALIZE;
         }
 
-        if (!arr.ptr)
-        {
+        if (!arr.ptr) {
             assert(arr.length == 0);
             void* ptr = GC.malloc(newsize, gcAttrs);
-            if (!ptr)
-            {
+            if (!ptr) {
                 onOutOfMemoryError();
                 assert(0);
             }
 
             // Handle initialization based on whether the type requires zero-init
-            static if (__traits(isZeroInit, T))
-            {
+            static if (__traits(isZeroInit, T)) {
                 memset(ptr, 0, newsize);
-            }
-            else
-            {
-                foreach (i; 0 .. newlength)
-                {
+            } else {
+                foreach (i; 0 .. newlength) {
                     emplace(cast(T*) ptr + i, T.init);
                 }
             }
@@ -215,30 +174,23 @@ T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength) @trusted
         bool isshared = is(UnqT == shared UnqT);
         void* newdata = cast(void*) arr.ptr;
 
-        if (!gc_expandArrayUsed(newdata[0 .. oldsize], newsize, isshared))
-        {
+        if (!gc_expandArrayUsed(newdata[0 .. oldsize], newsize, isshared)) {
             newdata = GC.malloc(newsize, gcAttrs);
-            if (!newdata)
-            {
+            if (!newdata) {
                 onOutOfMemoryError();
                 assert(0);
             }
             memcpy(newdata, cast(void*) arr.ptr, oldsize);
-            static if (__traits(compiles, __doPostblit(newdata, oldsize, UnqT)))
-            {
+            static if (__traits(compiles, __doPostblit(newdata, oldsize, UnqT))) {
                 __doPostblit(newdata, oldsize, UnqT);
             }
         }
 
         // Handle initialization based on whether the type requires zero-init
-        static if (__traits(isZeroInit, T))
-        {
+        static if (__traits(isZeroInit, T)) {
             memset(newdata + oldsize, 0, newsize - oldsize);
-        }
-        else
-        {
-            foreach (i; 0 .. newlength - arr.length)
-            {
+        } else {
+            foreach (i; 0 .. newlength - arr.length) {
                 emplace(cast(T*) (newdata + oldsize) + i, T.init);
             }
         }
