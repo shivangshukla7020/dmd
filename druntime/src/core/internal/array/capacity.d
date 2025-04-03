@@ -73,38 +73,6 @@ T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength) @trusted
         arr = arr[0 .. newlength];
         return arr;
     }
-
-    // For all other types, continue with normal processing
-    // static if (is(T == void)) {
-    //     size_t newsize = newlength;
-
-    //     if (!arr.ptr) {
-    //         assert(arr.length == 0);
-    //         void* ptr = GC.malloc(newsize, BlkAttr.NO_SCAN | BlkAttr.APPENDABLE);
-    //         if (!ptr) {
-    //             onOutOfMemoryError();
-    //             assert(0);
-    //         }
-    //         memset(ptr, 0, newsize);
-    //         arr = (cast(void*) ptr)[0 .. newlength];
-    //         return arr;
-    //     }
-
-    //     size_t oldsize = arr.length;
-    //     void* newdata = arr.ptr;
-
-    //     if (!gc_expandArrayUsed(newdata[0 .. oldsize], newsize, false)) {
-    //         newdata = GC.malloc(newsize, BlkAttr.NO_SCAN | BlkAttr.APPENDABLE);
-    //         if (!newdata) {
-    //             onOutOfMemoryError();
-    //             assert(0);
-    //         }
-    //         memcpy(newdata, arr.ptr, oldsize);
-    //     }
-    //     memset(newdata + oldsize, 0, newsize - oldsize);
-    //     arr = (cast(void*) newdata)[0 .. newlength];
-    //     return arr;
-    // } else {
         size_t sizeelem = T.sizeof;
         bool overflow = false;
         size_t newsize;
@@ -195,7 +163,6 @@ T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength) @trusted
 
         arr = (cast(T*) newdata)[0 .. newlength];
         return arr;
-    // }
 }
 
 // @safe unittest remains intact
