@@ -5,7 +5,7 @@ index 3af1088e5c..e616240466 100644
 @@ -9,22 +9,9 @@
  */
  module core.internal.array.capacity;
- 
+
 -import core.attribute : weak;
 -import core.checkedint : mulu;
 -import core.exception : onFinalizeError, onOutOfMemoryError, onUnicodeError;
@@ -19,14 +19,14 @@ index 3af1088e5c..e616240466 100644
 -
  debug (PRINTF) import core.stdc.stdio : printf;
  debug (VALGRIND) import etc.valgrind.valgrind;
- 
+
 -alias BlkAttr = GC.BlkAttr;
 -
  // for now, all GC array functions are not exposed via core.memory.
  extern(C) {
      void[] gc_getArrayUsed(void *ptr, bool atomic) nothrow;
 @@ -63,6 +50,16 @@ Throws:
- 
+
  T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength) @trusted
  {
 +    import core.attribute : weak;
@@ -40,11 +40,11 @@ index 3af1088e5c..e616240466 100644
 +    alias BlkAttr = GC.BlkAttr;
 +
      alias UnqT = Unqual!T;
- 
+
      debug(PRINTF)
 @@ -78,36 +75,36 @@ T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength) @trusted
      }
- 
+
      // For all other types, continue with normal processing
 -    static if (is(T == void)) {
 -        size_t newsize = newlength;
@@ -111,22 +111,22 @@ index 3af1088e5c..e616240466 100644
          size_t newsize;
 @@ -171,7 +168,8 @@ T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength) @trusted
          }
- 
+
          size_t oldsize = arr.length * sizeelem;
 -        bool isshared = is(UnqT == shared UnqT);
 +        // bool isshared = is(UnqT == shared UnqT); This will always be false, UnqT is by definition not shared.
 +        bool isshared = is(T == shared T);
          void* newdata = cast(void*) arr.ptr;
- 
+
          if (!gc_expandArrayUsed(newdata[0 .. oldsize], newsize, isshared)) {
 @@ -197,7 +195,7 @@ T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength) @trusted
- 
+
          arr = (cast(T*) newdata)[0 .. newlength];
          return arr;
 -    }
 +    // }
  }
- 
+
  // @safe unittest remains intact
 diff --git a/druntime/src/core/internal/array/concatenation.d b/druntime/src/core/internal/array/concatenation.d
 index 3cd52ae07b..29ad75941a 100644
@@ -139,25 +139,25 @@ index 3cd52ae07b..29ad75941a 100644
 -    import core.internal.array.capacity : _d_arraysetlengthT;
 +    import core.exception : onOutOfMemoryError;
 +    import core.internal.array.construction : _d_newarrayU;
-+    import core.internal.array.utils : __arrayAlloc;    
++    import core.internal.array.utils : __arrayAlloc;
      import core.internal.traits : hasElaborateCopyConstructor, Unqual;
      import core.lifetime : copyEmplace;
      import core.stdc.string : memcpy;
 @@ -28,8 +30,10 @@ Tret _d_arraycatnTX(Tret, Tarr...)(auto ref Tarr froms) @trusted
      size_t totalLen;
- 
+
      alias T = typeof(res[0]);
 +    alias UnqT = Unqual!T;
      enum elemSize = T.sizeof;
      enum hasPostblit = __traits(hasPostblit, T);
 +    enum isshared = is (T == shared T);
- 
+
      static foreach (from; froms)
          static if (is (typeof(from) : T))
 @@ -40,21 +44,8 @@ Tret _d_arraycatnTX(Tret, Tarr...)(auto ref Tarr froms) @trusted
      if (totalLen == 0)
          return res;
- 
+
 -    // We cannot use this, because it refuses to work if the array type has disabled default construction.
 -    // res.length = totalLen;
 -    // Call the runtime function directly instead.
@@ -175,6 +175,6 @@ index 3cd52ae07b..29ad75941a 100644
 -
 +    // `_d_newarrayU already creates a new array, so just use that instead
 +    res = cast(Tret) _d_newarrayU!UnqT(totalLen * T.sizeof, isshared);
- 
+
      /* Currently, if both a postblit and a cpctor are defined, the postblit is
       * used. If this changes, the condition below will have to be adapted.

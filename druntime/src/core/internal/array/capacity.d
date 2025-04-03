@@ -23,8 +23,8 @@ extern(C) {
 /**
 Resize a dynamic array by setting its `.length` property.
 
-Newly created elements are initialized based on their default value.  
-If the array's elements initialize to `0`, memory is zeroed out. Otherwise, elements are explicitly initialized.  
+Newly created elements are initialized based on their default value.
+If the array's elements initialize to `0`, memory is zeroed out. Otherwise, elements are explicitly initialized.
 
 This function handles memory allocation, expansion, and initialization while maintaining array integrity.
 
@@ -40,13 +40,12 @@ Params:
     arr         = The array to resize.
     newlength   = The new value for the array's `.length`.
 
-Returns:  
+Returns:
     The resized array with updated length and properly initialized elements.
 
-Throws:  
+Throws:
     OutOfMemoryError if allocation fails.
 */
-
 
 T[] _d_arraysetlengthT(T)(return scope ref T[] arr, size_t newlength) @trusted
 {
@@ -113,7 +112,7 @@ T[] _d_arraysetlengthT(T)(return scope ref T[] arr, size_t newlength) @trusted
     bool isshared = is(T == shared T);
 
     // 🔹 Fix `scope` issue: Prevent escaping `scope` data by keeping `oldptr` strongly typed
-    scope auto oldptr = arr.ptr; 
+    scope auto oldptr = arr.ptr;
 
     void* newdata = cast(void*) oldptr;  // ✅ Now correctly typed and won't escape `scope`
 
