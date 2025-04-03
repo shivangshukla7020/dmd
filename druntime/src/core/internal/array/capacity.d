@@ -48,7 +48,7 @@ Throws:
 */
 
 
-T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength) @trusted
+T[] _d_arraysetlengthT(T)(return scope ref T[] arr, size_t newlength) @trusted
 {
     import core.attribute : weak;
     import core.checkedint : mulu;
@@ -56,16 +56,12 @@ T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength) @trusted
     import core.stdc.string : memcpy, memset;
     import core.internal.traits : Unqual;
     import core.lifetime : emplace;
-
     import core.memory;
-    alias BlkAttr = GC.BlkAttr;
 
+    alias BlkAttr = GC.BlkAttr;
     alias UnqT = Unqual!T;
 
-    debug(PRINTF)
-    {
-        printf("_d_arraysetlengthT(arr.ptr = %p, arr.length = %zd, newlength = %zd)\n", arr.ptr, arr.length, newlength);
-    }
+    debug(PRINTF) printf("_d_arraysetlengthT(arr.ptr = %p, arr.length = %zd, newlength = %zd)\n", arr.ptr, arr.length, newlength);
 
     // If the new length is less than or equal to the current length, just truncate the array
     if (newlength <= arr.length)
@@ -73,96 +69,78 @@ T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength) @trusted
         arr = arr[0 .. newlength];
         return arr;
     }
-        size_t sizeelem = T.sizeof;
-        bool overflow = false;
-        size_t newsize;
 
-        version (D_InlineAsm_X86)
-        {
-            asm pure nothrow @nogc
-            {
-                mov EAX, newlength;
-                mul EAX, sizeelem;
-                mov newsize, EAX;
-                setc overflow;
-            }
-        }
-        else version (D_InlineAsm_X86_64)
-        {
-            asm pure nothrow @nogc
-            {
-                mov RAX, newlength;
-                mul RAX, sizeelem;
-                mov newsize, RAX;
-                setc overflow;
-            }
-        }
-        else {
-            newsize = mulu(sizeelem, newlength, overflow);
-        }
+    size_t sizeelem = T.sizeof;
+    bool overflow = false;
+    size_t newsize = mulu(sizeelem, newlength, overflow);
 
-        if (overflow) {
+    if (overflow)
+    {
+        onOutOfMemoryError();
+        assert(0);
+    }
+
+    debug(PRINTF) printf("newsize = %zx\n", newsize);
+
+    uint gcAttrs = BlkAttr.APPENDABLE;
+    static if (is(T == struct) && __traits(hasMember, T, "xdtor"))
+    {
+        gcAttrs |= BlkAttr.FINALIZE;
+    }
+
+    if (!arr.ptr)
+    {
+        assert(arr.length == 0);
+        void* ptr = GC.malloc(newsize, gcAttrs);
+        if (!ptr)
+        {
             onOutOfMemoryError();
             assert(0);
         }
 
-        debug(PRINTF) printf("newsize = %zx\n", newsize);
-
-        uint gcAttrs = BlkAttr.APPENDABLE;
-        static if (is(T == struct) && __traits(hasMember, T, "xdtor"))
-        {
-            gcAttrs |= BlkAttr.FINALIZE;
-        }
-
-        if (!arr.ptr) {
-            assert(arr.length == 0);
-            void* ptr = GC.malloc(newsize, gcAttrs);
-            if (!ptr) {
-                onOutOfMemoryError();
-                assert(0);
-            }
-
-            // Handle initialization based on whether the type requires zero-init
-            static if (__traits(isZeroInit, T)) {
-                memset(ptr, 0, newsize);
-            } else {
-                foreach (i; 0 .. newlength) {
-                    emplace(cast(T*) ptr + i, T.init);
-                }
-            }
-
-            arr = (cast(T*) ptr)[0 .. newlength];
-            return arr;
-        }
-
-        size_t oldsize = arr.length * sizeelem;
-        // bool isshared = is(UnqT == shared UnqT); This will always be false, UnqT is by definition not shared.
-        bool isshared = is(T == shared T);
-        void* newdata = cast(void*) arr.ptr;
-
-        if (!gc_expandArrayUsed(newdata[0 .. oldsize], newsize, isshared)) {
-            newdata = GC.malloc(newsize, gcAttrs);
-            if (!newdata) {
-                onOutOfMemoryError();
-                assert(0);
-            }
-            memcpy(newdata, cast(void*) arr.ptr, oldsize);
-            static if (__traits(compiles, __doPostblit(newdata, oldsize, UnqT))) {
-                __doPostblit(newdata, oldsize, UnqT);
-            }
-        }
-
         // Handle initialization based on whether the type requires zero-init
-        static if (__traits(isZeroInit, T)) {
-            memset(newdata + oldsize, 0, newsize - oldsize);
-        } else {
-            foreach (i; 0 .. newlength - arr.length) {
-                emplace(cast(T*) (newdata + oldsize) + i, T.init);
-            }
+        static if (__traits(isZeroInit, T))
+            memset(ptr, 0, newsize);
+        else
+            foreach (i; 0 .. newlength)
+                emplace(cast(T*) ptr + i, T.init);
+
+        arr = (cast(T*) ptr)[0 .. newlength];
+        return arr;
+    }
+
+    size_t oldsize = arr.length * sizeelem;
+    bool isshared = is(T == shared T);
+
+    // 🔹 Fix `scope` issue: Prevent escaping `scope` data by keeping `oldptr` strongly typed
+    scope auto oldptr = arr.ptr; 
+
+    void* newdata = cast(void*) oldptr;  // ✅ Now correctly typed and won't escape `scope`
+
+    if (!gc_expandArrayUsed(newdata[0 .. oldsize], newsize, isshared))
+    {
+        newdata = GC.malloc(newsize, gcAttrs);
+        if (!newdata)
+        {
+            onOutOfMemoryError();
+            assert(0);
         }
 
-        arr = (cast(T*) newdata)[0 .. newlength];
-        return arr;
+        memcpy(newdata, arr.ptr, oldsize);
+
+        static if (__traits(compiles, __doPostblit(newdata, oldsize, UnqT)))
+            __doPostblit(newdata, oldsize, UnqT);
+    }
+
+    // Handle initialization based on whether the type requires zero-init
+    static if (__traits(isZeroInit, T))
+        memset(cast(void*) (cast(ubyte*)newdata + oldsize), 0, newsize - oldsize);
+    else
+        foreach (i; 0 .. newlength - arr.length)
+            emplace(cast(T*) (cast(ubyte*)newdata + oldsize) + i, T.init);
+
+    arr = (cast(T*) newdata)[0 .. newlength];
+    return arr;
 }
 
 // @safe unittest remains intact
