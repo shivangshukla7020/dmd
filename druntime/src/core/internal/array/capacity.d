@@ -47,7 +47,7 @@ Throws:
     OutOfMemoryError if allocation fails.
 */
 
-T[] _d_arraysetlengthT(T)(return scope ref T[] arr, size_t newlength) @trusted
+size_t _d_arraysetlengthT(Tarr : T[], T)(return ref scope Tarr arr, size_t newlength) @trusted
 {
     import core.attribute : weak;
     import core.checkedint : mulu;
@@ -66,7 +66,7 @@ T[] _d_arraysetlengthT(T)(return scope ref T[] arr, size_t newlength) @trusted
     if (newlength <= arr.length)
     {
         arr = arr[0 .. newlength];
-        return arr;
+        return newlength;
     }
 
     size_t sizeelem = T.sizeof;
@@ -105,7 +105,7 @@ T[] _d_arraysetlengthT(T)(return scope ref T[] arr, size_t newlength) @trusted
                 emplace(cast(T*) ptr + i, T.init);
 
         arr = (cast(T*) ptr)[0 .. newlength];
-        return arr;
+        return newlength;
     }
 
     size_t oldsize = arr.length * sizeelem;
@@ -139,7 +139,7 @@ T[] _d_arraysetlengthT(T)(return scope ref T[] arr, size_t newlength) @trusted
             emplace(cast(T*) (cast(ubyte*)newdata + oldsize) + i, T.init);
 
     arr = (cast(T*) newdata)[0 .. newlength];
-    return arr;
+    return newlength;
 }
 
 // @safe unittest remains intact
@@ -151,13 +151,13 @@ T[] _d_arraysetlengthT(T)(return scope ref T[] arr, size_t newlength) @trusted
     }
 
     int[] arr;
-    _d_arraysetlengthT!(int)(arr, 16);
+    _d_arraysetlengthT!(typeof(arr))(arr, 16);
     assert(arr.length == 16);
     foreach (int i; arr)
         assert(i == int.init);
 
     shared S[] arr2;
-    _d_arraysetlengthT!(shared S)(arr2, 16);
+    _d_arraysetlengthT!(typeof(arr2))(arr2, 16);
     assert(arr2.length == 16);
     foreach (s; arr2)
         assert(s == S.init);

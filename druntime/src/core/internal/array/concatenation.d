@@ -22,7 +22,7 @@ Tret _d_arraycatnTX(Tret, Tarr...)(auto ref Tarr froms) @trusted
     import core.exception : onOutOfMemoryError;
     import core.internal.array.utils : __arrayAlloc;
     import core.internal.traits : hasElaborateCopyConstructor, Unqual;
-    import core.lifetime : emplace;
+    import core.lifetime : copyEmplace;
     import core.stdc.string : memcpy;
 
     Tret res;
@@ -43,68 +43,43 @@ Tret _d_arraycatnTX(Tret, Tarr...)(auto ref Tarr froms) @trusted
     if (totalLen == 0)
         return Tret.init; // Return an empty array if no elements are present
 
-    // Handle memory allocation based on type mutability
-    static if (is(T == immutable) || is(T == const))
-    {
-        // Allocate new memory since immutable/const arrays can't be modified in-place
-        auto tempArr = new UnqT[totalLen];
+    // Allocate memory for mutable arrays using __arrayAlloc
+    res = cast(Tret) __arrayAlloc!(UnqT)(elemSize * totalLen);
+    if (res.ptr is null)
+        onOutOfMemoryError(); // Abort if allocation fails
 
-        // Copy elements into the temporary buffer before casting to immutable
-        auto tempPtr = tempArr.ptr;
+    static if (hasElaborateCopyConstructor!T && !hasPostblit)
+    {
+        size_t i = 0;
         foreach (ref from; froms)
-        {
             static if (is(typeof(from) : T))
+                copyEmplace(cast(T) from, res[i++]);
+            else
             {
-                emplace(&tempPtr[0], from); // Construct single element in-place
-                tempPtr++;
+                if (from.length)
+                    foreach (ref elem; from)
+                        copyEmplace(cast(T) elem, res[i++]);
             }
+    }
+    else
+    {
+        auto resptr = cast(UnqT *) res;
+        foreach (ref from; froms)
+            static if (is (typeof(from) : T))
+                memcpy(resptr++, cast(UnqT *) &from, elemSize);
             else
             {
                 const len = from.length;
                 if (len)
                 {
-                    static if (hasPostblit)
-                        foreach (i; 0 .. len)
-                            emplace(&tempPtr[i], from[i]); // Copy using constructor
-                    else
-                        memcpy(tempPtr, from.ptr, len * elemSize); // Copy raw memory
-                    tempPtr += len;
+                    memcpy(resptr, cast(UnqT *) from, len * elemSize);
+                    resptr += len;
                 }
             }
-        }
 
-        res = cast(Tret) tempArr; // Cast mutable storage to immutable/const
-    }
-    else
-    {
-        // Allocate memory for mutable arrays using __arrayAlloc
-        res = cast(Tret) __arrayAlloc!(Tret)(elemSize * totalLen);
-        if (res.ptr is null)
-            onOutOfMemoryError(); // Abort if allocation fails
-    }
-
-    // Copy elements into the newly allocated array
-    auto resptr = cast(Unqual!T*) res.ptr;
-    foreach (ref from; froms)
-    {
-        static if (is(typeof(from) : T))
-        {
-            emplace(&resptr[0], from); // Construct a single element in-place
-            resptr++;
-        }
-        else
-        {
-            const len = from.length;
-            if (len)
-            {
-                static if (hasPostblit)
-                    foreach (i; 0 .. len)
-                        emplace(&resptr[i], from[i]); // Use constructor if needed
-                else
-                    memcpy(resptr, from.ptr, len * elemSize); // Copy raw memory otherwise
-                resptr += len;
-            }
-        }
+        static if (hasPostblit)
+            foreach (ref elem; res)
+                (cast() elem).__xpostblit();
     }
 
     return res;

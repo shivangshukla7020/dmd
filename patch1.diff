@@ -1,0 +1,347 @@
+diff --git a/druntime/src/core/internal/array/capacity.d b/druntime/src/core/internal/array/capacity.d
+index cd6abf015c..9942dcff1b 100644
+--- a/druntime/src/core/internal/array/capacity.d
++++ b/druntime/src/core/internal/array/capacity.d
+@@ -47,7 +47,7 @@ Throws:
+     OutOfMemoryError if allocation fails.
+ */
+ 
+-T[] _d_arraysetlengthT(T)(return scope ref T[] arr, size_t newlength) @trusted
++size_t _d_arraysetlengthT(Tarr : T[], T)(return ref scope Tarr arr, size_t newlength) @trusted
+ {
+     import core.attribute : weak;
+     import core.checkedint : mulu;
+@@ -66,7 +66,7 @@ T[] _d_arraysetlengthT(T)(return scope ref T[] arr, size_t newlength) @trusted
+     if (newlength <= arr.length)
+     {
+         arr = arr[0 .. newlength];
+-        return arr;
++        return newlength;
+     }
+ 
+     size_t sizeelem = T.sizeof;
+@@ -105,7 +105,7 @@ T[] _d_arraysetlengthT(T)(return scope ref T[] arr, size_t newlength) @trusted
+                 emplace(cast(T*) ptr + i, T.init);
+ 
+         arr = (cast(T*) ptr)[0 .. newlength];
+-        return arr;
++        return newlength;
+     }
+ 
+     size_t oldsize = arr.length * sizeelem;
+@@ -139,7 +139,7 @@ T[] _d_arraysetlengthT(T)(return scope ref T[] arr, size_t newlength) @trusted
+             emplace(cast(T*) (cast(ubyte*)newdata + oldsize) + i, T.init);
+ 
+     arr = (cast(T*) newdata)[0 .. newlength];
+-    return arr;
++    return newlength;
+ }
+ 
+ // @safe unittest remains intact
+@@ -151,13 +151,13 @@ T[] _d_arraysetlengthT(T)(return scope ref T[] arr, size_t newlength) @trusted
+     }
+ 
+     int[] arr;
+-    _d_arraysetlengthT!(int)(arr, 16);
++    _d_arraysetlengthT!(typeof(arr))(arr, 16);
+     assert(arr.length == 16);
+     foreach (int i; arr)
+         assert(i == int.init);
+ 
+     shared S[] arr2;
+-    _d_arraysetlengthT!(shared S)(arr2, 16);
++    _d_arraysetlengthT!(typeof(arr2))(arr2, 16);
+     assert(arr2.length == 16);
+     foreach (s; arr2)
+         assert(s == S.init);
+diff --git a/druntime/src/core/internal/array/concatenation.d b/druntime/src/core/internal/array/concatenation.d
+index c894050df1..310a06833a 100644
+--- a/druntime/src/core/internal/array/concatenation.d
++++ b/druntime/src/core/internal/array/concatenation.d
+@@ -22,7 +22,7 @@ Tret _d_arraycatnTX(Tret, Tarr...)(auto ref Tarr froms) @trusted
+     import core.exception : onOutOfMemoryError;
+     import core.internal.array.utils : __arrayAlloc;
+     import core.internal.traits : hasElaborateCopyConstructor, Unqual;
+-    import core.lifetime : emplace;
++    import core.lifetime : copyEmplace;
+     import core.stdc.string : memcpy;
+ 
+     Tret res;
+@@ -43,68 +43,43 @@ Tret _d_arraycatnTX(Tret, Tarr...)(auto ref Tarr froms) @trusted
+     if (totalLen == 0)
+         return Tret.init; // Return an empty array if no elements are present
+ 
+-    // Handle memory allocation based on type mutability
+-    static if (is(T == immutable) || is(T == const))
+-    {
+-        // Allocate new memory since immutable/const arrays can't be modified in-place
+-        auto tempArr = new UnqT[totalLen];
++    // Allocate memory for mutable arrays using __arrayAlloc
++    res = cast(Tret) __arrayAlloc!(UnqT)(elemSize * totalLen);
++    if (res.ptr is null)
++        onOutOfMemoryError(); // Abort if allocation fails
+ 
+-        // Copy elements into the temporary buffer before casting to immutable
+-        auto tempPtr = tempArr.ptr;
++    static if (hasElaborateCopyConstructor!T && !hasPostblit)
++    {
++        size_t i = 0;
+         foreach (ref from; froms)
+-        {
+             static if (is(typeof(from) : T))
++                copyEmplace(cast(T) from, res[i++]);
++            else
+             {
+-                emplace(&tempPtr[0], from); // Construct single element in-place
+-                tempPtr++;
++                if (from.length)
++                    foreach (ref elem; from)
++                        copyEmplace(cast(T) elem, res[i++]);
+             }
++    }
++    else
++    {
++        auto resptr = cast(UnqT *) res;
++        foreach (ref from; froms)
++            static if (is (typeof(from) : T))
++                memcpy(resptr++, cast(UnqT *) &from, elemSize);
+             else
+             {
+                 const len = from.length;
+                 if (len)
+                 {
+-                    static if (hasPostblit)
+-                        foreach (i; 0 .. len)
+-                            emplace(&tempPtr[i], from[i]); // Copy using constructor
+-                    else
+-                        memcpy(tempPtr, from.ptr, len * elemSize); // Copy raw memory
+-                    tempPtr += len;
++                    memcpy(resptr, cast(UnqT *) from, len * elemSize);
++                    resptr += len;
+                 }
+             }
+-        }
+ 
+-        res = cast(Tret) tempArr; // Cast mutable storage to immutable/const
+-    }
+-    else
+-    {
+-        // Allocate memory for mutable arrays using __arrayAlloc
+-        res = cast(Tret) __arrayAlloc!(Tret)(elemSize * totalLen);
+-        if (res.ptr is null)
+-            onOutOfMemoryError(); // Abort if allocation fails
+-    }
+-
+-    // Copy elements into the newly allocated array
+-    auto resptr = cast(Unqual!T*) res.ptr;
+-    foreach (ref from; froms)
+-    {
+-        static if (is(typeof(from) : T))
+-        {
+-            emplace(&resptr[0], from); // Construct a single element in-place
+-            resptr++;
+-        }
+-        else
+-        {
+-            const len = from.length;
+-            if (len)
+-            {
+-                static if (hasPostblit)
+-                    foreach (i; 0 .. len)
+-                        emplace(&resptr[i], from[i]); // Use constructor if needed
+-                else
+-                    memcpy(resptr, from.ptr, len * elemSize); // Copy raw memory otherwise
+-                resptr += len;
+-            }
+-        }
++        static if (hasPostblit)
++            foreach (ref elem; res)
++                (cast() elem).__xpostblit();
+     }
+ 
+     return res;
+diff --git a/patch.diff b/patch.diff
+index 3cc6f20dc7..6ea1d0ee8e 100644
+--- a/patch.diff
++++ b/patch.diff
+@@ -1,180 +0,0 @@
+-diff --git a/druntime/src/core/internal/array/capacity.d b/druntime/src/core/internal/array/capacity.d
+-index 3af1088e5c..e616240466 100644
+---- a/druntime/src/core/internal/array/capacity.d
+-+++ b/druntime/src/core/internal/array/capacity.d
+-@@ -9,22 +9,9 @@
+- */
+- module core.internal.array.capacity;
+-
+--import core.attribute : weak;
+--import core.checkedint : mulu;
+--import core.exception : onFinalizeError, onOutOfMemoryError, onUnicodeError;
+--import core.internal.gc.blockmeta : PAGESIZE;
+--import core.memory;
+--import core.stdc.stdlib : malloc;
+--import core.stdc.string : memcpy, memset;
+--import core.internal.traits : Unqual;
+--import core.lifetime : emplace;
+--import core.internal.array.construction : _d_newarrayU;
+--
+- debug (PRINTF) import core.stdc.stdio : printf;
+- debug (VALGRIND) import etc.valgrind.valgrind;
+-
+--alias BlkAttr = GC.BlkAttr;
+--
+- // for now, all GC array functions are not exposed via core.memory.
+- extern(C) {
+-     void[] gc_getArrayUsed(void *ptr, bool atomic) nothrow;
+-@@ -63,6 +50,16 @@ Throws:
+-
+- T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength) @trusted
+- {
+-+    import core.attribute : weak;
+-+    import core.checkedint : mulu;
+-+    import core.exception : onFinalizeError, onOutOfMemoryError;
+-+    import core.stdc.string : memcpy, memset;
+-+    import core.internal.traits : Unqual;
+-+    import core.lifetime : emplace;
+-+
+-+    import core.memory;
+-+    alias BlkAttr = GC.BlkAttr;
+-+
+-     alias UnqT = Unqual!T;
+-
+-     debug(PRINTF)
+-@@ -78,36 +75,36 @@ T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength) @trusted
+-     }
+-
+-     // For all other types, continue with normal processing
+--    static if (is(T == void)) {
+--        size_t newsize = newlength;
+--
+--        if (!arr.ptr) {
+--            assert(arr.length == 0);
+--            void* ptr = GC.malloc(newsize, BlkAttr.NO_SCAN | BlkAttr.APPENDABLE);
+--            if (!ptr) {
+--                onOutOfMemoryError();
+--                assert(0);
+--            }
+--            memset(ptr, 0, newsize);
+--            arr = (cast(void*) ptr)[0 .. newlength];
+--            return arr;
+--        }
+--
+--        size_t oldsize = arr.length;
+--        void* newdata = arr.ptr;
+--
+--        if (!gc_expandArrayUsed(newdata[0 .. oldsize], newsize, false)) {
+--            newdata = GC.malloc(newsize, BlkAttr.NO_SCAN | BlkAttr.APPENDABLE);
+--            if (!newdata) {
+--                onOutOfMemoryError();
+--                assert(0);
+--            }
+--            memcpy(newdata, arr.ptr, oldsize);
+--        }
+--        memset(newdata + oldsize, 0, newsize - oldsize);
+--        arr = (cast(void*) newdata)[0 .. newlength];
+--        return arr;
+--    } else {
+-+    // static if (is(T == void)) {
+-+    //     size_t newsize = newlength;
+-+
+-+    //     if (!arr.ptr) {
+-+    //         assert(arr.length == 0);
+-+    //         void* ptr = GC.malloc(newsize, BlkAttr.NO_SCAN | BlkAttr.APPENDABLE);
+-+    //         if (!ptr) {
+-+    //             onOutOfMemoryError();
+-+    //             assert(0);
+-+    //         }
+-+    //         memset(ptr, 0, newsize);
+-+    //         arr = (cast(void*) ptr)[0 .. newlength];
+-+    //         return arr;
+-+    //     }
+-+
+-+    //     size_t oldsize = arr.length;
+-+    //     void* newdata = arr.ptr;
+-+
+-+    //     if (!gc_expandArrayUsed(newdata[0 .. oldsize], newsize, false)) {
+-+    //         newdata = GC.malloc(newsize, BlkAttr.NO_SCAN | BlkAttr.APPENDABLE);
+-+    //         if (!newdata) {
+-+    //             onOutOfMemoryError();
+-+    //             assert(0);
+-+    //         }
+-+    //         memcpy(newdata, arr.ptr, oldsize);
+-+    //     }
+-+    //     memset(newdata + oldsize, 0, newsize - oldsize);
+-+    //     arr = (cast(void*) newdata)[0 .. newlength];
+-+    //     return arr;
+-+    // } else {
+-         size_t sizeelem = T.sizeof;
+-         bool overflow = false;
+-         size_t newsize;
+-@@ -171,7 +168,8 @@ T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength) @trusted
+-         }
+-
+-         size_t oldsize = arr.length * sizeelem;
+--        bool isshared = is(UnqT == shared UnqT);
+-+        // bool isshared = is(UnqT == shared UnqT); This will always be false, UnqT is by definition not shared.
+-+        bool isshared = is(T == shared T);
+-         void* newdata = cast(void*) arr.ptr;
+-
+-         if (!gc_expandArrayUsed(newdata[0 .. oldsize], newsize, isshared)) {
+-@@ -197,7 +195,7 @@ T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength) @trusted
+-
+-         arr = (cast(T*) newdata)[0 .. newlength];
+-         return arr;
+--    }
+-+    // }
+- }
+-
+- // @safe unittest remains intact
+-diff --git a/druntime/src/core/internal/array/concatenation.d b/druntime/src/core/internal/array/concatenation.d
+-index 3cd52ae07b..29ad75941a 100644
+---- a/druntime/src/core/internal/array/concatenation.d
+-+++ b/druntime/src/core/internal/array/concatenation.d
+-@@ -19,7 +19,9 @@ module core.internal.array.concatenation;
+-  */
+- Tret _d_arraycatnTX(Tret, Tarr...)(auto ref Tarr froms) @trusted
+- {
+--    import core.internal.array.capacity : _d_arraysetlengthT;
+-+    import core.exception : onOutOfMemoryError;
+-+    import core.internal.array.construction : _d_newarrayU;
+-+    import core.internal.array.utils : __arrayAlloc;
+-     import core.internal.traits : hasElaborateCopyConstructor, Unqual;
+-     import core.lifetime : copyEmplace;
+-     import core.stdc.string : memcpy;
+-@@ -28,8 +30,10 @@ Tret _d_arraycatnTX(Tret, Tarr...)(auto ref Tarr froms) @trusted
+-     size_t totalLen;
+-
+-     alias T = typeof(res[0]);
+-+    alias UnqT = Unqual!T;
+-     enum elemSize = T.sizeof;
+-     enum hasPostblit = __traits(hasPostblit, T);
+-+    enum isshared = is (T == shared T);
+-
+-     static foreach (from; froms)
+-         static if (is (typeof(from) : T))
+-@@ -40,21 +44,8 @@ Tret _d_arraycatnTX(Tret, Tarr...)(auto ref Tarr froms) @trusted
+-     if (totalLen == 0)
+-         return res;
+-
+--    // We cannot use this, because it refuses to work if the array type has disabled default construction.
+--    // res.length = totalLen;
+--    // Call the runtime function directly instead.
+--    // TODO: once `__arrayAlloc` is templated, call that instead.
+--    // version (D_ProfileGC)
+--    // {
+--    //     import core.internal.array.capacity : _d_arraysetlengthTTrace;
+--    //     // TODO: forward file, line, name from _d_arraycatnTXTrace
+--    //     _d_arraysetlengthTTrace!(typeof(res))(res, totalLen, __FILE__, __LINE__, __FUNCTION__);
+--    // }
+--    // else
+--    // {
+--    //     _d_arraysetlengthT!(typeof(res))(res, totalLen);
+--    // }
+--
+-+    // `_d_newarrayU already creates a new array, so just use that instead
+-+    res = cast(Tret) _d_newarrayU!UnqT(totalLen * T.sizeof, isshared);
+-
+-     /* Currently, if both a postblit and a cpctor are defined, the postblit is
+-      * used. If this changes, the condition below will have to be adapted.
