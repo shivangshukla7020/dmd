@@ -126,7 +126,7 @@ T[] _d_arraysetlengthT(T)(return scope ref T[] arr, size_t newlength) @trusted
             assert(0);
         }
 
-        memcpy(newdata, arr.ptr, oldsize);
+        memcpy(newdata, cast(const(void)*)arr.ptr, oldsize);
 
         static if (__traits(compiles, __doPostblit(newdata, oldsize, UnqT)))
             __doPostblit(newdata, oldsize, UnqT);
