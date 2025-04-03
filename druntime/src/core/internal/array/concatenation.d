@@ -19,7 +19,9 @@ module core.internal.array.concatenation;
  */
 Tret _d_arraycatnTX(Tret, Tarr...)(auto ref Tarr froms) @trusted
 {
-    import core.internal.array.capacity : _d_arraysetlengthT;
+    import core.exception : onOutOfMemoryError;
+    import core.internal.array.construction : _d_newarrayU;
+    import core.internal.array.utils : __arrayAlloc;    
     import core.internal.traits : hasElaborateCopyConstructor, Unqual;
     import core.lifetime : copyEmplace;
     import core.stdc.string : memcpy;
@@ -28,8 +30,10 @@ Tret _d_arraycatnTX(Tret, Tarr...)(auto ref Tarr froms) @trusted
     size_t totalLen;
 
     alias T = typeof(res[0]);
+    alias UnqT = Unqual!T;
     enum elemSize = T.sizeof;
     enum hasPostblit = __traits(hasPostblit, T);
+    enum isshared = is (T == shared T);
 
     static foreach (from; froms)
         static if (is (typeof(from) : T))
@@ -40,21 +44,8 @@ Tret _d_arraycatnTX(Tret, Tarr...)(auto ref Tarr froms) @trusted
     if (totalLen == 0)
         return res;
 
-    // We cannot use this, because it refuses to work if the array type has disabled default construction.
-    // res.length = totalLen;
-    // Call the runtime function directly instead.
-    // TODO: once `__arrayAlloc` is templated, call that instead.
-    // version (D_ProfileGC)
-    // {
-    //     import core.internal.array.capacity : _d_arraysetlengthTTrace;
-    //     // TODO: forward file, line, name from _d_arraycatnTXTrace
-    //     _d_arraysetlengthTTrace!(typeof(res))(res, totalLen, __FILE__, __LINE__, __FUNCTION__);
-    // }
-    // else
-    // {
-    //     _d_arraysetlengthT!(typeof(res))(res, totalLen);
-    // }
-
+    // `_d_newarrayU already creates a new array, so just use that instead
+    res = cast(Tret) _d_newarrayU!UnqT(totalLen * T.sizeof, isshared);
 
     /* Currently, if both a postblit and a cpctor are defined, the postblit is
      * used. If this changes, the condition below will have to be adapted.

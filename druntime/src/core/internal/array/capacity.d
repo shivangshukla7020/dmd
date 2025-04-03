@@ -9,21 +9,8 @@
 */
 module core.internal.array.capacity;
 
-import core.attribute : weak;
-import core.checkedint : mulu;
-import core.exception : onFinalizeError, onOutOfMemoryError, onUnicodeError;
-import core.internal.gc.blockmeta : PAGESIZE;
-import core.memory;
-import core.stdc.stdlib : malloc;
-import core.stdc.string : memcpy, memset;
-import core.internal.traits : Unqual;
-import core.lifetime : emplace;
-import core.internal.array.construction : _d_newarrayU;
-
 debug (PRINTF) import core.stdc.stdio : printf;
 debug (VALGRIND) import etc.valgrind.valgrind;
-
-alias BlkAttr = GC.BlkAttr;
 
 // for now, all GC array functions are not exposed via core.memory.
 extern(C) {
@@ -63,6 +50,16 @@ Throws:
 
 T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength) @trusted
 {
+    import core.attribute : weak;
+    import core.checkedint : mulu;
+    import core.exception : onFinalizeError, onOutOfMemoryError;
+    import core.stdc.string : memcpy, memset;
+    import core.internal.traits : Unqual;
+    import core.lifetime : emplace;
+
+    import core.memory;
+    alias BlkAttr = GC.BlkAttr;
+
     alias UnqT = Unqual!T;
 
     debug(PRINTF)
@@ -78,36 +75,36 @@ T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength) @trusted
     }
 
     // For all other types, continue with normal processing
-    static if (is(T == void)) {
-        size_t newsize = newlength;
+    // static if (is(T == void)) {
+    //     size_t newsize = newlength;
 
-        if (!arr.ptr) {
-            assert(arr.length == 0);
-            void* ptr = GC.malloc(newsize, BlkAttr.NO_SCAN | BlkAttr.APPENDABLE);
-            if (!ptr) {
-                onOutOfMemoryError();
-                assert(0);
-            }
-            memset(ptr, 0, newsize);
-            arr = (cast(void*) ptr)[0 .. newlength];
-            return arr;
-        }
+    //     if (!arr.ptr) {
+    //         assert(arr.length == 0);
+    //         void* ptr = GC.malloc(newsize, BlkAttr.NO_SCAN | BlkAttr.APPENDABLE);
+    //         if (!ptr) {
+    //             onOutOfMemoryError();
+    //             assert(0);
+    //         }
+    //         memset(ptr, 0, newsize);
+    //         arr = (cast(void*) ptr)[0 .. newlength];
+    //         return arr;
+    //     }
 
-        size_t oldsize = arr.length;
-        void* newdata = arr.ptr;
+    //     size_t oldsize = arr.length;
+    //     void* newdata = arr.ptr;
 
-        if (!gc_expandArrayUsed(newdata[0 .. oldsize], newsize, false)) {
-            newdata = GC.malloc(newsize, BlkAttr.NO_SCAN | BlkAttr.APPENDABLE);
-            if (!newdata) {
-                onOutOfMemoryError();
-                assert(0);
-            }
-            memcpy(newdata, arr.ptr, oldsize);
-        }
-        memset(newdata + oldsize, 0, newsize - oldsize);
-        arr = (cast(void*) newdata)[0 .. newlength];
-        return arr;
-    } else {
+    //     if (!gc_expandArrayUsed(newdata[0 .. oldsize], newsize, false)) {
+    //         newdata = GC.malloc(newsize, BlkAttr.NO_SCAN | BlkAttr.APPENDABLE);
+    //         if (!newdata) {
+    //             onOutOfMemoryError();
+    //             assert(0);
+    //         }
+    //         memcpy(newdata, arr.ptr, oldsize);
+    //     }
+    //     memset(newdata + oldsize, 0, newsize - oldsize);
+    //     arr = (cast(void*) newdata)[0 .. newlength];
+    //     return arr;
+    // } else {
         size_t sizeelem = T.sizeof;
         bool overflow = false;
         size_t newsize;
@@ -171,7 +168,8 @@ T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength) @trusted
         }
 
         size_t oldsize = arr.length * sizeelem;
-        bool isshared = is(UnqT == shared UnqT);
+        // bool isshared = is(UnqT == shared UnqT); This will always be false, UnqT is by definition not shared.
+        bool isshared = is(T == shared T);
         void* newdata = cast(void*) arr.ptr;
 
         if (!gc_expandArrayUsed(newdata[0 .. oldsize], newsize, isshared)) {
@@ -197,7 +195,7 @@ T[] _d_arraysetlengthT(T)(ref T[] arr, size_t newlength) @trusted
 
         arr = (cast(T*) newdata)[0 .. newlength];
         return arr;
-    }
+    // }
 }
 
 // @safe unittest remains intact
