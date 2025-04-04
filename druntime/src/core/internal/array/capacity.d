@@ -125,10 +125,15 @@ size_t _d_arraysetlengthT(Tarr : T[], T)(return ref scope Tarr arr, size_t newle
             assert(0);
         }
 
-        memcpy(newdata, cast(const(void)*)arr.ptr, oldsize);
-
-        static if (__traits(compiles, __doPostblit(newdata, oldsize, UnqT)))
-            __doPostblit(newdata, oldsize, UnqT);
+        static if (__traits(compiles, (*cast(UnqT*)newdata) = arr[0]))
+        {
+            foreach (i; 0 .. arr.length)
+                emplace(cast(UnqT*)newdata + i, arr[i]); // invokes postblit if any
+        }
+        else
+        {
+            memcpy(newdata, cast(const(void)*)arr.ptr, oldsize);
+        }
     }
 
     // Handle initialization based on whether the type requires zero-init
