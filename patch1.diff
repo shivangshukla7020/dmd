@@ -5,7 +5,7 @@ index cd6abf015c..9942dcff1b 100644
 @@ -47,7 +47,7 @@ Throws:
      OutOfMemoryError if allocation fails.
  */
- 
+
 -T[] _d_arraysetlengthT(T)(return scope ref T[] arr, size_t newlength) @trusted
 +size_t _d_arraysetlengthT(Tarr : T[], T)(return ref scope Tarr arr, size_t newlength) @trusted
  {
@@ -18,36 +18,36 @@ index cd6abf015c..9942dcff1b 100644
 -        return arr;
 +        return newlength;
      }
- 
+
      size_t sizeelem = T.sizeof;
 @@ -105,7 +105,7 @@ T[] _d_arraysetlengthT(T)(return scope ref T[] arr, size_t newlength) @trusted
                  emplace(cast(T*) ptr + i, T.init);
- 
+
          arr = (cast(T*) ptr)[0 .. newlength];
 -        return arr;
 +        return newlength;
      }
- 
+
      size_t oldsize = arr.length * sizeelem;
 @@ -139,7 +139,7 @@ T[] _d_arraysetlengthT(T)(return scope ref T[] arr, size_t newlength) @trusted
              emplace(cast(T*) (cast(ubyte*)newdata + oldsize) + i, T.init);
- 
+
      arr = (cast(T*) newdata)[0 .. newlength];
 -    return arr;
 +    return newlength;
  }
- 
+
  // @safe unittest remains intact
 @@ -151,13 +151,13 @@ T[] _d_arraysetlengthT(T)(return scope ref T[] arr, size_t newlength) @trusted
      }
- 
+
      int[] arr;
 -    _d_arraysetlengthT!(int)(arr, 16);
 +    _d_arraysetlengthT!(typeof(arr))(arr, 16);
      assert(arr.length == 16);
      foreach (int i; arr)
          assert(i == int.init);
- 
+
      shared S[] arr2;
 -    _d_arraysetlengthT!(shared S)(arr2, 16);
 +    _d_arraysetlengthT!(typeof(arr2))(arr2, 16);
@@ -65,12 +65,12 @@ index c894050df1..310a06833a 100644
 -    import core.lifetime : emplace;
 +    import core.lifetime : copyEmplace;
      import core.stdc.string : memcpy;
- 
+
      Tret res;
 @@ -43,68 +43,43 @@ Tret _d_arraycatnTX(Tret, Tarr...)(auto ref Tarr froms) @trusted
      if (totalLen == 0)
          return Tret.init; // Return an empty array if no elements are present
- 
+
 -    // Handle memory allocation based on type mutability
 -    static if (is(T == immutable) || is(T == const))
 -    {
@@ -80,7 +80,7 @@ index c894050df1..310a06833a 100644
 +    res = cast(Tret) __arrayAlloc!(UnqT)(elemSize * totalLen);
 +    if (res.ptr is null)
 +        onOutOfMemoryError(); // Abort if allocation fails
- 
+
 -        // Copy elements into the temporary buffer before casting to immutable
 -        auto tempPtr = tempArr.ptr;
 +    static if (hasElaborateCopyConstructor!T && !hasPostblit)
@@ -121,7 +121,7 @@ index c894050df1..310a06833a 100644
                  }
              }
 -        }
- 
+
 -        res = cast(Tret) tempArr; // Cast mutable storage to immutable/const
 -    }
 -    else
@@ -158,7 +158,7 @@ index c894050df1..310a06833a 100644
 +            foreach (ref elem; res)
 +                (cast() elem).__xpostblit();
      }
- 
+
      return res;
 diff --git a/patch.diff b/patch.diff
 index 3cc6f20dc7..6ea1d0ee8e 100644
