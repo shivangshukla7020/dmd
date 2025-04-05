@@ -11297,7 +11297,6 @@ private extern (C++) final class ExpressionSemanticVisitor : Visitor
             arguments.push(ale.e1);  // array
             arguments.push(exp.e2);  // new length
 
-            // We no longer need isZeroInitialized; it's handled inside _d_arraysetlengthT
             Expression ce = new CallExp(ale.loc, id, arguments).expressionSemantic(sc);
             auto res = new LoweredAssignExp(exp, ce);
             res.type = Type.tsize_t;
