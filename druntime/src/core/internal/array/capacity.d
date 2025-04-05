@@ -69,7 +69,7 @@ size_t _d_arraysetlengthT(Tarr : T[], T)(return ref scope Tarr arr, size_t newle
         return newlength;
     }
 
-    size_t sizeelem = T.sizeof;
+    enum sizeelem = T.sizeof;
     bool overflow = false;
     size_t newsize = mulu(sizeelem, newlength, overflow);
 
