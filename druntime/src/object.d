@@ -4692,6 +4692,7 @@ version (D_ProfileGC)
     public import core.lifetime : _d_newitemTTrace;
     public import core.internal.array.construction : _d_newarrayTTrace;
     public import core.internal.array.construction : _d_newarraymTXTrace;
+    public import core.internal.array.capacity: _d_arraysetlengthTTrace;
 }
 public import core.internal.array.appending : _d_arrayappendcTX;
 public import core.internal.array.comparison : __cmp;
