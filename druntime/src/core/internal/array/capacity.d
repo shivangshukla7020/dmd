@@ -111,7 +111,7 @@ size_t _d_arraysetlengthT(Tarr : T[], T)(return ref scope Tarr arr, size_t newle
     size_t oldsize = arr.length * sizeelem;
     bool isshared = is(T == shared T);
 
-    auto newdata = cast(void*) arr.ptr
+    auto newdata = cast(void*) arr.ptr;
 
     if (!gc_expandArrayUsed(newdata[0 .. oldsize], newsize, isshared))
     {
