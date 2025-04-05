@@ -41,7 +41,7 @@ Tret _d_arraycatnTX(Tret, Tarr...)(auto ref Tarr froms) @trusted
             totalLen += from.length; // Arrays contribute their full length
 
     if (totalLen == 0)
-        return Tret.init; // Return an empty array if no elements are present
+        return res; // Return an empty array if no elements are present
 
     // Allocate memory for mutable arrays using __arrayAlloc
     res = cast(Tret) __arrayAlloc!(UnqT)(elemSize * totalLen);
