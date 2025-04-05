@@ -111,10 +111,7 @@ size_t _d_arraysetlengthT(Tarr : T[], T)(return ref scope Tarr arr, size_t newle
     size_t oldsize = arr.length * sizeelem;
     bool isshared = is(T == shared T);
 
-    // 🔹 Fix `scope` issue: Prevent escaping `scope` data by keeping `oldptr` strongly typed
-    scope auto oldptr = arr.ptr;
-
-    void* newdata = cast(void*) oldptr;  // ✅ Now correctly typed and won't escape `scope`
+    auto newdata = cast(void*) arr.ptr
 
     if (!gc_expandArrayUsed(newdata[0 .. oldsize], newsize, isshared))
     {
