@@ -148,11 +148,9 @@ version (D_ProfileGC)
 {
     enum errorMessage = "Cannot resize arrays";
     import core.internal.array.utils : _d_HookTraceImpl;
-    import core.internal.traits : Unqual;
 
     // Function wrapper around the hook, so it’s callable
     size_t _d_arraysetlengthTTrace(Tarr : T[], T)(return ref scope Tarr arr, size_t newlength) @trusted
-        if (is(Tarr == T[]))
     {
         alias Hook = _d_HookTraceImpl!(Tarr, _d_arraysetlengthT!Tarr, errorMessage);
         return Hook(arr, newlength);
