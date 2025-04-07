@@ -165,12 +165,12 @@ version (D_ProfileGC)
         return ref scope Tarr arr,
         size_t newlength,
         string file = __FILE__,
-        int line = __LINE__,        
+        int line = __LINE__,
         string func = __FUNCTION__
     ) @trusted
     {
         alias Hook = _d_HookTraceImpl!(Tarr, _d_arraysetlengthT!Tarr, errorMessage);
-        return Hook(arr, newlength, file, line, func); 
+        return Hook(arr, newlength, file, line, func);
     }
 }
 
