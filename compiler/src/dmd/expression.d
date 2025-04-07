@@ -3774,7 +3774,7 @@ extern (C++) final class ArrayLengthExp : UnaExp
 
     override void accept(Visitor v)
     {
-        v.visit(this); // Accept the visitor for processing
+        v.visit(this);
     }
 }
 
