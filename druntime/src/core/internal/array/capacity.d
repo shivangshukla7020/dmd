@@ -97,12 +97,21 @@ size_t _d_arraysetlengthT(Tarr : T[], T)(return ref scope Tarr arr, size_t newle
             assert(0);
         }
 
-        // Handle initialization based on whether the type requires zero-init
         static if (__traits(isZeroInit, T))
+        {
             memset(ptr, 0, newsize);
+        }
+        else static if (is(T == inout U, U))
+        {
+            // Cannot directly construct inout types; use unqualified T.init
+            foreach (i; 0 .. newlength)
+                emplace(cast(UnqT*) ptr + i, UnqT.init);
+        }
         else
+        {
             foreach (i; 0 .. newlength)
                 emplace(cast(T*) ptr + i, T.init);
+        }
 
         arr = (cast(T*) ptr)[0 .. newlength];
         return newlength;
@@ -137,8 +146,10 @@ size_t _d_arraysetlengthT(Tarr : T[], T)(return ref scope Tarr arr, size_t newle
     static if (__traits(isZeroInit, T))
         memset(cast(void*) (cast(ubyte*)newdata + oldsize), 0, newsize - oldsize);
     else
+    {
         foreach (i; 0 .. newlength - arr.length)
-            emplace(cast(T*) (cast(ubyte*)newdata + oldsize) + i, T.init);
+            emplace(cast(UnqT*) (cast(ubyte*)newdata + oldsize) + i, UnqT.init);
+    }
 
     arr = (cast(T*) newdata)[0 .. newlength];
     return newlength;
@@ -150,10 +161,16 @@ version (D_ProfileGC)
     import core.internal.array.utils : _d_HookTraceImpl;
 
     // Function wrapper around the hook, so it’s callable
-    size_t _d_arraysetlengthTTrace(Tarr : T[], T)(return ref scope Tarr arr, size_t newlength) @trusted
+    size_t _d_arraysetlengthTTrace(Tarr : T[], T)(
+        return ref scope Tarr arr,
+        size_t newlength,
+        string file = __FILE__,
+        int line = __LINE__,        
+        string func = __FUNCTION__
+    ) @trusted
     {
         alias Hook = _d_HookTraceImpl!(Tarr, _d_arraysetlengthT!Tarr, errorMessage);
-        return Hook(arr, newlength);
+        return Hook(arr, newlength, file, line, func); 
     }
 }
 
