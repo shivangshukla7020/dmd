@@ -11278,7 +11278,6 @@ private extern (C++) final class ExpressionSemanticVisitor : Visitor
                 as = as.expressionSemantic(sc);
                 auto res = Expression.combine(as, exp.e2);
                 res.type = ale.type;
-                ale.lowering = res;  // Cache the lowered result
                 return setResult(res);
             }
 
