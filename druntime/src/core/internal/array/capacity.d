@@ -70,8 +70,34 @@ size_t _d_arraysetlengthT(Tarr : T[], T)(return ref scope Tarr arr, size_t newle
     }
 
     enum sizeelem = T.sizeof;
-    bool overflow = false;
-    size_t newsize = mulu(sizeelem, newlength, overflow);
+    ubyte overflow = 0;
+
+    size_t newsize = void;
+
+    version (D_InlineAsm_X86)
+    {
+        asm pure nothrow @nogc
+        {
+            mov EAX, sizeelem;
+            mul newlength;        // EDX:EAX = EAX * newlength
+            mov newsize, EAX;
+            setc overflow;
+        }
+    }
+    else version (D_InlineAsm_X86_64)
+    {
+        asm pure nothrow @nogc
+        {
+            mov RAX, sizeelem;
+            mul newlength;        // RDX:RAX = RAX * newlength
+            mov newsize, RAX;
+            setc overflow;
+        }
+    }
+    else
+    {
+        newsize = mulu(sizeelem, newlength, overflow);
+    }
 
     if (overflow)
     {
