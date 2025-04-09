@@ -157,10 +157,10 @@ size_t _d_arraysetlengthT(Tarr : T[], T)(return ref scope Tarr arr, size_t newle
             assert(0);
         }
 
-        static if (__traits(compiles, (*cast(UnqT*)newdata) = arr[0]))
+        static if (__traits(compiles, emplace(cast(UnqT*)newdata, arr[0])))
         {
             foreach (i; 0 .. arr.length)
-                emplace(cast(UnqT*)newdata + i, arr[i]); // invokes postblit if any
+                emplace(cast(UnqT*)newdata + i, arr[i]); // safe copy
         }
         else
         {
@@ -171,10 +171,15 @@ size_t _d_arraysetlengthT(Tarr : T[], T)(return ref scope Tarr arr, size_t newle
     // Handle initialization based on whether the type requires zero-init
     static if (__traits(isZeroInit, T))
         memset(cast(void*) (cast(ubyte*)newdata + oldsize), 0, newsize - oldsize);
-    else
+    else static if (__traits(compiles, emplace(cast(UnqT*) (cast(ubyte*)newdata + oldsize), UnqT.init)))
     {
         foreach (i; 0 .. newlength - arr.length)
             emplace(cast(UnqT*) (cast(ubyte*)newdata + oldsize) + i, UnqT.init);
+    }
+    else
+    {
+        foreach (i; 0 .. newlength - arr.length)
+            memcpy(cast(UnqT*) (cast(ubyte*)newdata + oldsize) + i, cast(const void*)&UnqT.init, T.sizeof);
     }
 
     arr = (cast(T*) newdata)[0 .. newlength];
