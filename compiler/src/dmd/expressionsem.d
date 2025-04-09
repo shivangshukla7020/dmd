@@ -11288,7 +11288,9 @@ private extern (C++) final class ExpressionSemanticVisitor : Visitor
             }
 
             // Fix: Ensure correct reference for _d_arraysetlengthT
-            Expression id = new IdentifierExp(ale.loc, hook);
+            Expression id = new IdentifierExp(ale.loc, Id.empty);
+            id = new DotIdExp(ale.loc, id, Id.object);
+            id = new DotIdExp(ale.loc, id, hook);
             id = id.expressionSemantic(sc);
 
             // Generate call: _d_arraysetlengthT(e1, e2)
