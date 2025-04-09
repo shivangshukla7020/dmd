@@ -43,17 +43,6 @@ Tret _d_arraycatnTX(Tret, Tarr...)(auto ref Tarr froms) @trusted
     if (totalLen == 0)
         return res; // Return an empty array if no elements are present
 
-    // version (D_ProfileGC)
-    // {
-    //     import core.internal.array.capacity : _d_arraysetlengthTTrace;
-    //     _d_arraysetlengthTTrace!(typeof(res))(res, totalLen, __FILE__, __LINE__, __FUNCTION__);
-    // }
-    // else
-    // {
-    //     import core.internal.array.capacity : _d_arraysetlengthT;
-    //     _d_arraysetlengthT!(typeof(res))(res, totalLen);
-    // }
-
     // Allocate memory for mutable arrays using __arrayAlloc
     res = cast(Tret) __arrayAlloc!(UnqT)(elemSize * totalLen);
 
