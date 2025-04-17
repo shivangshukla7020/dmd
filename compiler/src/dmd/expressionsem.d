@@ -11290,13 +11290,22 @@ private extern (C++) final class ExpressionSemanticVisitor : Visitor
             // Fix: Ensure correct reference for _d_arraysetlengthT
             Expression id = new IdentifierExp(ale.loc, Id.empty);
             id = new DotIdExp(ale.loc, id, Id.object);
-            id = new DotIdExp(ale.loc, id, hook);
+            auto tiargs = new Objects();
+
+            const isShared = ale.e1.type.nextOf.isShared();
+
+            auto t = ale.e1.type.toBasetype.unqualify(MODFlags.wild | MODFlags.const_ |
+            MODFlags.immutable_ | MODFlags.shared_);
+            tiargs.push(t);
+
+            id = new DotTemplateInstanceExp(ale.loc, id, hook, tiargs);
             id = id.expressionSemantic(sc);
 
             // Generate call: _d_arraysetlengthT(e1, e2)
             auto arguments = new Expressions();
             arguments.push(ale.e1);  // array
             arguments.push(exp.e2);  // new length
+            arguments.push(new IntegerExp(exp.loc, isShared, Type.tbool));
 
             Expression ce = new CallExp(ale.loc, id, arguments).expressionSemantic(sc);
             auto res = new LoweredAssignExp(exp, ce);

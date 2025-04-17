@@ -47,7 +47,7 @@ Throws:
     OutOfMemoryError if allocation fails.
 */
 
-size_t _d_arraysetlengthT(Tarr : T[], T)(return ref scope Tarr arr, size_t newlength) @trusted
+size_t _d_arraysetlengthT(Tarr : T[], T)(return ref scope Tarr arr, size_t newlength, bool isShared) @trusted
 {
     import core.attribute : weak;
     import core.checkedint : mulu;
@@ -144,11 +144,11 @@ size_t _d_arraysetlengthT(Tarr : T[], T)(return ref scope Tarr arr, size_t newle
     }
 
     size_t oldsize = arr.length * sizeelem;
-    bool isshared = is(T == shared T);
+    // bool isshared = is(T == shared T);
 
     auto newdata = cast(void*) arr.ptr;
 
-    if (!gc_expandArrayUsed(newdata[0 .. oldsize], newsize, isshared))
+    if (!gc_expandArrayUsed(newdata[0 .. oldsize], newsize, isShared))
     {
         newdata = GC.malloc(newsize, gcAttrs);
         if (!newdata)
@@ -195,13 +195,14 @@ version (D_ProfileGC)
     size_t _d_arraysetlengthTTrace(Tarr : T[], T)(
         return ref scope Tarr arr,
         size_t newlength,
+        bool isShared,
         string file = __FILE__,
         int line = __LINE__,
         string func = __FUNCTION__
     ) @trusted
     {
         alias Hook = _d_HookTraceImpl!(Tarr, _d_arraysetlengthT!Tarr, errorMessage);
-        return Hook(arr, newlength, file, line, func);
+        return Hook(arr, newlength, isShared, file, line, func);
     }
 }
 
@@ -214,13 +215,13 @@ version (D_ProfileGC)
     }
 
     int[] arr;
-    _d_arraysetlengthT!(typeof(arr))(arr, 16);
+    _d_arraysetlengthT!(typeof(arr))(arr, 16, false);
     assert(arr.length == 16);
     foreach (int i; arr)
         assert(i == int.init);
 
     shared S[] arr2;
-    _d_arraysetlengthT!(typeof(arr2))(arr2, 16);
+    _d_arraysetlengthT!(typeof(arr2))(arr2, 16, true);
     assert(arr2.length == 16);
     foreach (s; arr2)
         assert(s == S.init);
